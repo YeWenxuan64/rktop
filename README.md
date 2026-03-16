@@ -105,33 +105,141 @@
 
 ## 🔧关键查询命令
   ```bash
-  #CPU load (需要根据时间计算)
+  # CPU load (需要根据时间计算)
   $ cat /proc/stat
 
-  #CPU freq
+  # 输出内容大致为 CPU 使用率、中断、上下文切换等系统级别的统计信息
+  cpu  7850 0 2276 29032 524 0 54 0 0 0
+  cpu0 891 0 382 3570 41 0 46 0 0 0
+  cpu1 920 0 280 3726 34 0 2 0 0 0
+  cpu2 948 0 269 3702 43 0 2 0 0 0
+  cpu3 948 0 237 3746 30 0 1 0 0 0
+  cpu4 966 0 316 3624 77 0 0 0 0 0
+  cpu5 1046 0 361 3442 131 0 0 0 0 0
+  cpu6 1125 0 189 3569 87 0 0 0 0 0
+  cpu7 1002 0 238 3649 78 0 0 0 0 0
+  intr 266997 0 19407 152304 0 0 1901 1224 0 0 0 0 0 0 46113 1758 0 0 0 0 0 0 0 0 0 0 1 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1824 0 0 0 0 1221 628 0 0 0 0 0 0 96 145 12948 1 0 0 1194 58 262 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 15 13 0 8943 16940
+  ctxt 471681
+  btime 1773649958
+  processes 2511
+  procs_running 8
+  procs_blocked 0
+  softirq 113012 98 6695 2 431 16138 0 13198 15300 0 61150
+  ```
+
+  ```bash
+  # CPU freq
   $ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq (or cpu1, cpu2 etc)
 
-  #GPU load
+  # 输出内容为指定逻辑cpu核心的频率, 单位为khz
+  1800000
+  ```
+
+  ```bash
+  # GPU load
   $ cat /sys/class/devfreq/fb000000.gpu/load
 
-  #GPU freq
+  # 输出内容为Panfrost/Panthor驱动下的GPU使用率以及频率
+  22@300000000Hz
+  ```
+
+  ```bash
+  # GPU freq
   $ cat /sys/class/devfreq/fb000000.gpu/cur_freq
 
-  #NPU load
+  # 输出内容为Panfrost/Panthor驱动下的GPU频率, 单位为hz
+  300000000
+  ```
+
+  ```bash
+  # NPU load
   $ sudo cat /sys/kernel/debug/rknpu/load
 
-  #NPU freq
+  # 输出内容为三个NPU的使用率 (rk3588)
+  NPU load:  Core0:  0%, Core1:  0%, Core2:  0%,
+  ```
+
+  ```bash
+  # NPU freq
   $ cat /sys/class/devfreq/fdab0000.npu/cur_freq
 
-  #RGA load
+  # 输出内容为三个NPU共用的频率 (rk3588)
+  1000000000
+  ```
+
+  ```bash
+  # RGA load
   $ sudo cat /sys/kernel/debug/rkrga/load
 
-  #RGA freq (需要挑选(虽然小女子也不知道选哪一个, 就随便选了三个))
+  # 输出内容为rag调度器的数量, 和调度器的使用率
+  num of scheduler = 3
+  ================= load ==================
+  scheduler[0]: rga3
+           load = 0%
+  -----------------------------------
+  scheduler[1]: rga3
+           load = 0%
+  -----------------------------------
+  scheduler[2]: rga2
+           load = 0%
+  -----------------------------------
+  =========================================
+  <session>  <status>  <tgid>  <process>
+  ```
+
+
+  ```bash
+  # RGA freq (需要挑选(虽然小女子也不知道选哪一个, 就随便选了三个))
   $ sudo cat /sys/kernel/debug/clk/clk_summary | grep rga
 
-  #TEMP
-  $ sensors
+  # 输出内容为rag相关的时钟
+        hclk_rga3_0           0        4        0   198000000          0     0  50000         N
+        hclk_rga2             0        2        0   198000000          0     0  50000         N
+     hclk_rga3_root           0        1        0   198000000          0     0  50000         N
+        hclk_rga3_1           0        4        0   198000000          0     0  50000         N
+  clk_rga3_0_core             0        1        0   750000000          0     0  50000         N
+  clk_rga2_core               0        1        0   750000000          0     0  50000         N
+     aclk_rga3_0              0        4        0   750000000          0     0  50000         N
+     aclk_rga2                0        2        0   750000000          0     0  50000         N
+  aclk_rga3_root              0        1        0   750000000          0     0  50000         N
+     aclk_rga3_1              0        4        0   750000000          0     0  50000         N
+  clk_rga3_1_core             0        1        0   750000000          0     0  50000         N
   ```
+
+  ```bash
+  # TEMP
+  $ sensors
+
+  # 输出内容为lm-sensors能读取的的设备名称与温度
+  npu_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +45.3°C  (crit = +115.0°C)
+  
+  center_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +46.2°C  (crit = +115.0°C)
+  
+  bigcore1_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +46.2°C  (crit = +115.0°C)
+  
+  soc_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +46.2°C  (crit = +115.0°C)
+  
+  gpu_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +45.3°C  (crit = +115.0°C)
+  
+  littlecore_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +46.2°C  (crit = +115.0°C)
+  
+  bigcore0_thermal-virtual-0
+  Adapter: Virtual device
+  temp1:        +46.2°C  (crit = +115.0°C)
+  ```
+
 
 ## 📝 许可证
 本项目采用 MIT 许可证。
