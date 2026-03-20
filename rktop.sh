@@ -84,9 +84,17 @@ trap 'tput cnorm; exit' INT EXIT
 # 绘制进度条函数
 draw_bar() {
     local percent=$1
-    if ! [[ "$percent" =~ ^[0-9]+$ ]]; then percent=0; fi
+    if ! [[ "$percent" =~ ^[0-9]+$ ]]; then
+        percent=0;
+    fi
 
     local filled=$((percent * BAR_WIDTH / 100))
+
+    # 如果百分比 > 2 但计算结果为 0，则强制显示 1 格
+    if (( percent > 0 && filled == 0 )); then
+        filled=1
+    fi
+
     local empty=$((BAR_WIDTH - filled))
 
     # 颜色定义
@@ -157,14 +165,23 @@ get_clk_freq() {
 
 query_rga_status() {
     # 3.1 解析负载
+
     if [[ -f "$RGA_LOAD_FILE" ]]; then
-        # 匹配 scheduler[0] 行的下一行的 load = X%
-        RGA_LOAD0=$(awk '/scheduler\[0\]/{getline; gsub(/%| /,""); print $3}' "$RGA_LOAD_FILE")
-        RGA_LOAD1=$(awk '/scheduler\[1\]/{getline; gsub(/%| /,""); print $3}' "$RGA_LOAD_FILE")
-        RGA_LOAD2=$(awk '/scheduler\[2\]/{getline; gsub(/%| /,""); print $3}' "$RGA_LOAD_FILE")
+        # 匹配 load = 后面是数字的行, 使用数组 () 接收多行输出：
+        RGA_LOADS=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
+
+        # 【修复点】安全取值，带默认值
+        RGA_LOAD0=${RGA_LOADS[0]:-0}
+        RGA_LOAD1=${RGA_LOADS[1]:-0}
+        RGA_LOAD2=${RGA_LOADS[2]:-0}
     else
         RGA_LOAD0=0; RGA_LOAD1=0; RGA_LOAD2=0
     fi
+
+    # 【修复点】二次校验确保是纯数字
+    [[ "$RGA_LOAD0" =~ ^[0-9]+$ ]] || RGA_LOAD0=0
+    [[ "$RGA_LOAD1" =~ ^[0-9]+$ ]] || RGA_LOAD1=0
+    [[ "$RGA_LOAD2" =~ ^[0-9]+$ ]] || RGA_LOAD2=0
 
     # 3.2 解析频率 (调用辅助函数)
     RGA_FREQ0=$(get_clk_freq "clk_rga3_0_core")
@@ -320,11 +337,8 @@ while true; do
 
     # --- RGA 区域 ---
     echo -e " RGA Status (Video Proc):"
-    # RGA3 Core0
     printf "  RGA3_0: "; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
-    # RGA3 Core1
     printf "  RGA3_1: "; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
-    # RGA2 Core
     printf "  RGA2  : "; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
 
     echo -e "--------------------"
