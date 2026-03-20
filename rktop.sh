@@ -270,6 +270,16 @@ display_cpu_status() {
     fi
 }
 
+
+# 定义清屏重绘函数
+redraw_screen() {
+    clear  # 清屏
+    tput cup 0 0  # 将光标移回左上角
+}
+
+# 捕获 SIGWINCH 信号，窗口大小变化时调用 redraw_screen 函数
+trap redraw_screen SIGWINCH
+
 # --- 主循环 ---
 while true; do
     tput cup 0 0
