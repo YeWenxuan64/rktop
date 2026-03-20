@@ -37,10 +37,10 @@
   Util : [||||||||                 ]  28% @ 0.30 GHz
   GPU temperature: +44.0°C
 
-  RAG Status:
-  RAG3_0: [                         ]   0% @ 0.75 GHz
-  RAG3_1: [                         ]   0% @ 0.75 GHz
-  RAG2:   [                         ]   0% @ 0.75 GHz
+  RGA Status:
+  RGA3_0: [                         ]   0% @ 0.75 GHz
+  RGA3_1: [                         ]   0% @ 0.75 GHz
+  RGA2:   [                         ]   0% @ 0.75 GHz
   --------------------
   ```
 
