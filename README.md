@@ -175,7 +175,7 @@
   num of scheduler = 3
   ================= load ==================
   scheduler[0]: rga3
-           load = 0%
+           load = 3%
   -----------------------------------
   scheduler[1]: rga3
            load = 0%
@@ -185,6 +185,7 @@
   -----------------------------------
   =========================================
   <session>  <status>  <tgid>  <process>
+  9          active    1186240  ffmpeg -y -init_hw_device rkmpp=hw -filter_hw_device hw -f x11grab -video_size 1920x1080 -framerate 30 -i :0.0 -vf hwupload,scale_rkrga=format=nv12 -c:v hevc_rkmpp -b:v 6144k -maxrate 16384k ./output.mp4
   ```
 
 
