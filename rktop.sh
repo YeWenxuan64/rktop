@@ -16,11 +16,6 @@ CLK_SUMMARY_FILE="/sys/kernel/debug/clk/clk_summary"
 PROC_STAT_FILE="/proc/stat"
 CPU_FREQ_BASE_PATH="/sys/devices/system/cpu"
 
-# 进度条宽度
-BAR_WIDTH=25
-
-# 刷新时间 (秒)
-REFRESH_TIME=0.5
 
 # --- 全局变量定义 (用于存储各设备状态) ---
 # NPU
@@ -51,7 +46,7 @@ declare -a CPU_PREV_IDLE
 CPU_CORE_COUNT=0
 CPU_FIRST_RUN=1
 SOC_TEMP=0
-LITTLE_core_TEMP=0
+LITTLE_CORE_TEMP=0
 BIG_CORE0_TEMP=0
 BIG_CORE1_TEMP=0
 
@@ -62,6 +57,8 @@ if [ "$(id -u)" -ne 0 ]; then
     # exec 命令会替换当前 shell 进程，这样在 sudo 完成后脚本就不会继续执行
     exec sudo "$0" "$@"
 fi
+
+
 
 # ---文件检查 ---
 if [[ ! -f "$NPU_LOAD_FILE" ]]; then echo "警告：找不到 NPU load 文件"; fi
@@ -74,12 +71,46 @@ if [[ ! -f "$CLK_SUMMARY_FILE" ]]; then echo "警告：找不到 RGA clk_summary
 
 if [[ ! -f "$PROC_STAT_FILE" ]]; then echo "警告：找不到 $PROC_STAT_FILE 文件"; fi
 
-# --- 功能函数 ---
 
-# 初始化终端
-clear
-tput civis
-trap 'tput cnorm; exit' INT EXIT
+
+# === 自适应配置 ===
+# 进度条最小宽度（终端过窄时的保底值）
+BAR_WIDTH_BASE=5
+# 进度条最大宽度（避免窗口过大时进度条太长）
+BAR_WIDTH_MAX=40
+# 预留边距：标签+分隔符+百分比+频率等约需30字符
+LAYOUT_MARGIN=65
+# 刷新时间 (秒)
+REFRESH_TIME=0.5
+
+
+# 动态计算 BAR_WIDTH
+calc_bar_width() {
+    local term_width=80
+    local cols
+
+    # 获取终端宽度
+    if cols=$(tput cols 2>/dev/null); then
+        term_width=$cols
+    elif [[ -n "$COLUMNS" ]]; then
+        term_width=$COLUMNS
+    fi
+
+
+    # 双列布局时，每列可用宽度 = (总宽 - 边距) / 2
+    local available=$(( (term_width - LAYOUT_MARGIN) / 2 ))
+    # 限制范围
+    if (( available < BAR_WIDTH_BASE )); then
+        BAR_WIDTH=$BAR_WIDTH_BASE
+    elif (( available > BAR_WIDTH_MAX )); then
+        BAR_WIDTH=$BAR_WIDTH_MAX
+    else
+        BAR_WIDTH=$available
+    fi
+}
+
+
+# --- 功能函数 ---
 
 # 绘制进度条函数
 draw_bar() {
@@ -104,9 +135,12 @@ draw_bar() {
     local CYAN='\033[36m'
     local NC='\033[0m'
 
-    if (( percent > 80 )); then COLOR=$RED
-    elif (( percent > 50 )); then COLOR=$YELLOW
-    else COLOR=$GREEN
+    if (( percent > 80 )); then 
+        COLOR=$RED
+    elif (( percent > 50 )); then 
+        COLOR=$YELLOW
+    else 
+        COLOR=$GREEN
     fi
 
     local i
@@ -122,7 +156,6 @@ draw_bar() {
 
     printf "${CYAN}]${NC}"
 }
-
 
 
 # --- 设备查询函数 ---
@@ -156,24 +189,16 @@ query_gpu_status() {
 }
 
 # 3. 查询 RGA 状态 (负载与频率)
-# 提取频率的辅助函数 (从 clk_summary 中提取)
-get_clk_freq() {
-    # $1: 时钟名称
-    local clk_name=$1
-    grep -w "$clk_name" "$CLK_SUMMARY_FILE" 2>/dev/null | awk '{printf "%.2f", $5/1000000000}'
-}
-
 query_rga_status() {
     # 3.1 解析负载
-
     if [[ -f "$RGA_LOAD_FILE" ]]; then
         # 匹配 load = 后面是数字的行, 使用数组 () 接收多行输出：
-        RGA_LOADS=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
+        local rga_loads=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
 
         # 【修复点】安全取值，带默认值
-        RGA_LOAD0=${RGA_LOADS[0]:-0}
-        RGA_LOAD1=${RGA_LOADS[1]:-0}
-        RGA_LOAD2=${RGA_LOADS[2]:-0}
+        RGA_LOAD0=${rga_loads[0]:-0}
+        RGA_LOAD1=${rga_loads[1]:-0}
+        RGA_LOAD2=${rga_loads[2]:-0}
     else
         RGA_LOAD0=0; RGA_LOAD1=0; RGA_LOAD2=0
     fi
@@ -183,10 +208,12 @@ query_rga_status() {
     [[ "$RGA_LOAD1" =~ ^[0-9]+$ ]] || RGA_LOAD1=0
     [[ "$RGA_LOAD2" =~ ^[0-9]+$ ]] || RGA_LOAD2=0
 
-    # 3.2 解析频率 (调用辅助函数)
-    RGA_FREQ0=$(get_clk_freq "clk_rga3_0_core")
-    RGA_FREQ1=$(get_clk_freq "clk_rga3_1_core")
-    RGA_FREQ2=$(get_clk_freq "clk_rga2_core")
+    # 3.2 解析频率
+    local clk_data=$(cat /sys/kernel/debug/clk/clk_summary | grep rga)
+
+    RGA_FREQ0=$(echo "$clk_data" | awk '$1 == "clk_rga3_0_core" {printf "%.2f", $5/1000000000}')
+    RGA_FREQ1=$(echo "$clk_data" | awk '$1 == "clk_rga3_1_core" {printf "%.2f", $5/1000000000}')
+    RGA_FREQ2=$(echo "$clk_data" | awk '$1 == "clk_rga2_core" {printf "%.2f", $5/1000000000}')
 }
 
 # 4. 查询 CPU 状态 (负载与频率)
@@ -240,20 +267,6 @@ query_cpu_status() {
     CPU_FIRST_RUN=0
 }
 
-# 5. 查询温度
-query_temperature() {
-    local sensors_output
-    sensors_output=$(sensors)
-
-    SOC_TEMP=$(echo "$sensors_output" | awk '/^soc_thermal/{getline; getline; print $2}')
-    LITTLE_core_TEMP=$(echo "$sensors_output" | awk '/^littlecore_thermal/{getline; getline; print $2}')
-    BIG_CORE0_TEMP=$(echo "$sensors_output" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
-    BIG_CORE1_TEMP=$(echo "$sensors_output" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
-
-    NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
-    GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
-}
-
 display_cpu_status() {
     if [[ $CPU_CORE_COUNT -gt 0 ]]; then
         # 计算分列点，左半部分和右半部分
@@ -287,17 +300,41 @@ display_cpu_status() {
     fi
 }
 
+# 5. 查询温度
+query_temperature() {
+    local sensors_output
+    sensors_output=$(sensors)
+
+    SOC_TEMP=$(echo "$sensors_output" | awk '/^soc_thermal/{getline; getline; print $2}')
+    LITTLE_CORE_TEMP=$(echo "$sensors_output" | awk '/^littlecore_thermal/{getline; getline; print $2}')
+    BIG_CORE0_TEMP=$(echo "$sensors_output" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
+    BIG_CORE1_TEMP=$(echo "$sensors_output" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
+
+    NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
+    GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
+}
+
+
+
+
 
 # 定义清屏重绘函数
 redraw_screen() {
     clear  # 清屏
     tput cup 0 0  # 将光标移回左上角
+
+    calc_bar_width
 }
 
 # 捕获 SIGWINCH 信号，窗口大小变化时调用 redraw_screen 函数
 trap redraw_screen SIGWINCH
 
+# 初始化终端
+tput civis
+trap 'tput cnorm; exit' INT EXIT
+
 # --- 主循环 ---
+redraw_screen
 while true; do
     tput cup 0 0
 
@@ -317,7 +354,7 @@ while true; do
     echo -e " CPU Status:"
     display_cpu_status
     printf "  SOC temperature: %s \n"  "$SOC_TEMP"
-    printf "  Little cores temperature: %s \n"  "$LITTLE_core_TEMP"
+    printf "  Little cores temperature: %s \n"  "$LITTLE_CORE_TEMP"
     printf "  Big core0 temperature: %s \t Big core1 temperature: %s \n"  "$BIG_CORE0_TEMP" "$BIG_CORE1_TEMP"
     echo -e ""
 
