@@ -84,21 +84,16 @@ LAYOUT_MARGIN=65
 REFRESH_TIME=0.5
 
 
+# 终端尺寸全局变量
+TERM_LINES=24
+TERM_COLS=80
+
 # 动态计算 BAR_WIDTH
 calc_bar_width() {
-    local term_width=80
-    local cols
-
-    # 获取终端宽度
-    if cols=$(tput cols 2>/dev/null); then
-        term_width=$cols
-    elif [[ -n "$COLUMNS" ]]; then
-        term_width=$COLUMNS
-    fi
-
+    # 使用全局变量 TERM_COLS
 
     # 双列布局时，每列可用宽度 = (总宽 - 边距) / 2
-    local available=$(( (term_width - LAYOUT_MARGIN) / 2 ))
+    local available=$(( (TERM_COLS - LAYOUT_MARGIN) / 2 ))
     # 限制范围
     if (( available < BAR_WIDTH_BASE )); then
         BAR_WIDTH=$BAR_WIDTH_BASE
@@ -315,7 +310,25 @@ query_temperature() {
 }
 
 
+# 更新终端尺寸 (行数和列数)
+get_term_size() {
+    # 会写入全局变量 TERM_LINES 和 TERM_COLS
+    
+    local lines cols
+    # 获取行数 (高度)
+    if lines=$(tput lines 2>/dev/null); then
+        TERM_LINES=$lines
+    elif [[ -n "$LINES" ]]; then
+        TERM_LINES=$LINES
+    fi
 
+    # 获取列数 (宽度)
+    if cols=$(tput cols 2>/dev/null); then
+        TERM_COLS=$cols
+    elif [[ -n "$COLUMNS" ]]; then
+        TERM_COLS=$COLUMNS
+    fi
+}
 
 
 # 定义清屏重绘函数
@@ -323,6 +336,7 @@ redraw_screen() {
     clear  # 清屏
     tput cup 0 0  # 将光标移回左上角
 
+    get_term_size
     calc_bar_width
 }
 
