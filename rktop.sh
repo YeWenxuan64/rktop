@@ -642,6 +642,9 @@ while true; do
     echo -e " Rockchip Monitor (Refresh: "$REFRESH_TIME"s)\t\tTime: $(date +"%H:%M:%S")"
     echo -e "--------------------"
 
+    # test
+    # echo -e " $TERM_COLS columns, $TERM_LINES lines (BAR_WIDTH: $BAR_WIDTH, Used: $LAYOUT_USED/$LAYOUT_BUDGET)"
+
     # --- CPU 区域 ---
     if (( SHOW_CPU )); then
         display_cpu_status

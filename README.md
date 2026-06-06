@@ -1,4 +1,12 @@
 # rktop
+
+[![No Compile](https://img.shields.io/badge/build-no%20compile-brightgreen?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
+[![Platform](https://img.shields.io/badge/platform-Linux%20ARM64-orange?style=flat-square&logo=linux&logoColor=white)](https://github.com/YeWenxuan64/rktop)
+[![Language](https://img.shields.io/badge/language-Bash-4EAA25?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success?style=flat-square)](https://github.com/YeWenxuan64/rktop)
+[![Code Size](https://img.shields.io/github/languages/code-size/YeWenxuan64/rktop?style=flat-square&color=blueviolet)](https://github.com/YeWenxuan64/rktop)
+
 一个轻量级的 Bash Shell 脚本，即下载即用，用于实时监控基于 Rockchip 芯片（特别是 RK3588 系列）的开发板硬件状态喵。<br>
 是叶姐姐🍃在Rockchip平台调试Focus-Finder项目时用氛围编程写的。
 
