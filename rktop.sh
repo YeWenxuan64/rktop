@@ -50,6 +50,15 @@ RGA_FREQ0="N/A"
 RGA_FREQ1="N/A"
 RGA_FREQ2="N/A"
 
+# Memory (单位: KB，由 free 命令解析)
+MEM_TOTAL=0
+MEM_USED=0
+MEM_AVAILABLE=0
+MEM_PERCENT=0
+SWAP_TOTAL=0
+SWAP_USED=0
+SWAP_PERCENT=0
+
 
 
 # --- 权限检查与自动提权 ---
@@ -89,12 +98,18 @@ LAYOUT_MARGIN=65
 # 刷新时间 (秒)
 REFRESH_TIME=0.5
 
-BAR_WIDTH=BAR_WIDTH_BASE
+# 单列宽条参数（用于 Memory 等无左右分列的模块）
+# 宽条 = 终端宽度 - 固定开销（缩进+标签+冒号+百分号+数值+括号+边距）
+WIDE_BAR_OVERHEAD=34
+# 宽条上限：单列宽度约为双列 BAR_WIDTH_MAX 的两倍
+WIDE_BAR_MAX=$(( BAR_WIDTH_MAX * 2 ))
+
+BAR_WIDTH=$BAR_WIDTH_BASE
 
 # --- 布局管理：模块显示高度与可见性 ---
 # 各模块固定行数（不含动态部分）
 HDR_LINES=2        # 标题行 + 分隔线
-FTR_LINES=3        # 分隔线 + 退出提示
+FTR_LINES=3        # 分隔线 + 退出提示 + 保留
 
 # CPU 模块高度组成：标题(1) + ceil(cores/2) 行核心对 + 温度(4)
 CPU_STATUS_HDR=1
@@ -109,16 +124,23 @@ GPU_LINES=4
 # RGA 模块：标题(1) + 3通道行(3)
 RGA_LINES=4
 
+# MEM 模块：标题(1) + RAM行(1) + Swap行(1) + 空行(1)
+MEM_LINES=4
+
 # 可见性标志：1=显示, 0=隐藏
 SHOW_CPU=1
 SHOW_CPU_TEMP=1
 SHOW_NPU=1
 SHOW_GPU=1
 SHOW_RGA=1
+SHOW_MEM=1
 
 # 记录当前总行数预算与实际占用
 LAYOUT_BUDGET=0
 LAYOUT_USED=0
+
+# 重入保护锁（防止 SIGWINCH trap 嵌套触发）
+REDRAW_LOCK=0
 
 
 
@@ -183,9 +205,9 @@ cpu_module_lines() {
 
 # 动态布局计算：根据终端高度决定各模块显隐
 # 隐藏优先级（越低越先被隐藏）：
-#   RGA < GPU < NPU < CPU_TEMP < CPU_STATUS (永不隐藏)
+#   RGA < GPU < NPU < MEM < CPU_TEMP < CPU_STATUS (永不隐藏)
 # 读取全局变量: TERM_LINES, HDR_LINES, FTR_LINES, SHOW_*, LAYOUT_*
-# 写入全局变量: SHOW_CPU, SHOW_CPU_TEMP, SHOW_NPU, SHOW_GPU, SHOW_RGA, LAYOUT_BUDGET, LAYOUT_USED
+# 写入全局变量: SHOW_CPU, SHOW_CPU_TEMP, SHOW_NPU, SHOW_GPU, SHOW_RGA, SHOW_MEM, LAYOUT_BUDGET, LAYOUT_USED
 calculate_layout() {
     LAYOUT_BUDGET=$TERM_LINES
     LAYOUT_USED=$(( HDR_LINES + FTR_LINES ))
@@ -196,11 +218,12 @@ calculate_layout() {
     SHOW_NPU=1
     SHOW_GPU=1
     SHOW_RGA=1
+    SHOW_MEM=1
 
     # 累加所有模块
     local cpu_lines
     cpu_lines=$(cpu_module_lines)
-    LAYOUT_USED=$(( LAYOUT_USED + cpu_lines + NPU_LINES + GPU_LINES + RGA_LINES ))
+    LAYOUT_USED=$(( LAYOUT_USED + cpu_lines + NPU_LINES + GPU_LINES + RGA_LINES + MEM_LINES ))
 
     # 按优先级从低到高依次隐藏
     if (( LAYOUT_USED > LAYOUT_BUDGET )); then
@@ -216,6 +239,10 @@ calculate_layout() {
         LAYOUT_USED=$(( LAYOUT_USED - NPU_LINES ))
     fi
     if (( LAYOUT_USED > LAYOUT_BUDGET )); then
+        SHOW_MEM=0
+        LAYOUT_USED=$(( LAYOUT_USED - MEM_LINES ))
+    fi
+    if (( LAYOUT_USED > LAYOUT_BUDGET )); then
         SHOW_CPU_TEMP=0
         LAYOUT_USED=$(( LAYOUT_USED - CPU_TEMP_LINES ))
     fi
@@ -223,22 +250,24 @@ calculate_layout() {
 }
 
 # 绘制进度条函数
-# 读取全局变量: BAR_WIDTH
+# 参数: $1=百分比, $2=可选宽度(默认使用全局 BAR_WIDTH)
+# 读取全局变量: BAR_WIDTH (当 $2 未提供时)
 # 写入全局变量: (无)
 draw_bar() {
     local percent=$1
+    local width=${2:-$BAR_WIDTH}
     if ! [[ "$percent" =~ ^[0-9]+$ ]]; then
         percent=0;
     fi
 
-    local filled=$((percent * BAR_WIDTH / 100))
+    local filled=$((percent * width / 100))
 
     # 如果百分比 > 2 但计算结果为 0，则强制显示 1 格
     if (( percent > 0 && filled == 0 )); then
         filled=1
     fi
 
-    local empty=$((BAR_WIDTH - filled))
+    local empty=$((width - filled))
 
     # 颜色定义
     local GREEN='\033[32m'
@@ -274,69 +303,7 @@ draw_bar() {
 
 # --- 设备查询函数 ---
 
-# 1. 查询 NPU 状态 (负载与频率)
-# 读取全局变量: NPU_LOAD_FILE, NPU_FREQ_FILE
-# 写入全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ
-query_npu_status() {
-    if [[ -f "$NPU_LOAD_FILE" ]]; then
-        # 解析负载 (Core0, Core1, Core2)
-        read -r NPU_CORE0_LOAD NPU_CORE1_LOAD NPU_CORE2_LOAD <<< $(awk '{gsub(/%|,/,""); print $4, $6, $8}' "$NPU_LOAD_FILE" 2>/dev/null)
-    else
-        NPU_CORE0_LOAD=0; NPU_CORE1_LOAD=0; NPU_CORE2_LOAD=0
-    fi
-
-    # 解析频率
-    if [[ -f "$NPU_FREQ_FILE" ]]; then
-        NPU_FREQ=$(awk '{printf "%.2f", $1/1000000000}' "$NPU_FREQ_FILE" 2>/dev/null)
-    else
-        NPU_FREQ="N/A"
-    fi
-}
-
-# 2. 查询 GPU 状态 (负载与频率)
-# 读取全局变量: GPU_FILE
-# 写入全局变量: GPU_LOAD, GPU_FREQ
-query_gpu_status() {
-    if [[ -f "$GPU_FILE" ]]; then
-        # GPU 文件格式通常为 "Load@FreqHz"，例如 "120@800000000"
-        read -r GPU_LOAD GPU_FREQ <<< $(cat "$GPU_FILE" | awk -F'@' '{gsub(/Hz/, "", $2); printf "%d %.2f", $1, $2/1000000000}')
-    else
-        GPU_LOAD=0
-        GPU_FREQ="N/A"
-    fi
-}
-
-# 3. 查询 RGA 状态 (负载与频率)
-# 读取全局变量: RGA_LOAD_FILE, CLK_SUMMARY_FILE
-# 写入全局变量: RGA_LOAD0, RGA_LOAD1, RGA_LOAD2, RGA_FREQ0, RGA_FREQ1, RGA_FREQ2
-query_rga_status() {
-    # 3.1 解析负载
-    if [[ -f "$RGA_LOAD_FILE" ]]; then
-        # 匹配 load = 后面是数字的行, 使用数组 () 接收多行输出：
-        local rga_loads=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
-
-        # 【修复点】安全取值，带默认值
-        RGA_LOAD0=${rga_loads[0]:-0}
-        RGA_LOAD1=${rga_loads[1]:-0}
-        RGA_LOAD2=${rga_loads[2]:-0}
-    else
-        RGA_LOAD0=0; RGA_LOAD1=0; RGA_LOAD2=0
-    fi
-
-    # 【修复点】二次校验确保是纯数字
-    [[ "$RGA_LOAD0" =~ ^[0-9]+$ ]] || RGA_LOAD0=0
-    [[ "$RGA_LOAD1" =~ ^[0-9]+$ ]] || RGA_LOAD1=0
-    [[ "$RGA_LOAD2" =~ ^[0-9]+$ ]] || RGA_LOAD2=0
-
-    # 3.2 解析频率
-    local clk_data=$(cat /sys/kernel/debug/clk/clk_summary | grep rga)
-
-    RGA_FREQ0=$(echo "$clk_data" | awk '$1 == "clk_rga3_0_core" {printf "%.2f", $5/1000000000}')
-    RGA_FREQ1=$(echo "$clk_data" | awk '$1 == "clk_rga3_1_core" {printf "%.2f", $5/1000000000}')
-    RGA_FREQ2=$(echo "$clk_data" | awk '$1 == "clk_rga2_core" {printf "%.2f", $5/1000000000}')
-}
-
-# 4. 查询 CPU 状态 (负载与频率)
+# 1. 查询 CPU 状态 (负载与频率)
 # 读取全局变量: PROC_STAT_FILE, CPU_FREQ_BASE_PATH, CPU_FIRST_RUN, CPU_PREV_TOTAL[], CPU_PREV_IDLE[]
 # 写入全局变量: CPU_CORE_COUNT, CPU_LOAD[], CPU_FREQ[], CPU_PREV_TOTAL[], CPU_PREV_IDLE[], CPU_FIRST_RUN
 query_cpu_status() {
@@ -389,7 +356,7 @@ query_cpu_status() {
     CPU_FIRST_RUN=0
 }
 
-# 5. 查询温度
+# 1.5 查询CPU温度
 # 读取全局变量: (无，调用 sensors 命令)
 # 写入全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP, NPU_TEMP, GPU_TEMP
 query_temperature() {
@@ -404,6 +371,107 @@ query_temperature() {
     NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
     GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
 }
+
+# 2. 查询内存状态 (基于 free 命令, 单位 KB)
+# 读取全局变量: (无, 调用 free 命令)
+# 写入全局变量: MEM_TOTAL, MEM_USED, MEM_AVAILABLE, MEM_PERCENT, SWAP_TOTAL, SWAP_USED, SWAP_PERCENT
+query_memory_status() {
+    local free_output
+    # 强制英文 locale，避免中文 "内存/交换" 导致 awk 匹配失败
+    free_output=$(LANG=C free 2>/dev/null)
+
+    # 解析 Mem 行: total used free shared buff/cache available
+    MEM_TOTAL=$(echo "$free_output" | awk '/^Mem:/ {print $2}')
+    MEM_USED=$(echo "$free_output" | awk '/^Mem:/ {print $3}')
+    MEM_AVAILABLE=$(echo "$free_output" | awk '/^Mem:/ {print $7}')
+
+    # 解析 Swap 行: total used free
+    SWAP_TOTAL=$(echo "$free_output" | awk '/^Swap:/ {print $2}')
+    SWAP_USED=$(echo "$free_output" | awk '/^Swap:/ {print $3}')
+
+    # 保底值
+    [[ "$MEM_TOTAL"     =~ ^[0-9]+$ ]] || MEM_TOTAL=0
+    [[ "$MEM_AVAILABLE" =~ ^[0-9]+$ ]] || MEM_AVAILABLE=0
+    [[ "$SWAP_TOTAL"    =~ ^[0-9]+$ ]] || SWAP_TOTAL=0
+    [[ "$SWAP_USED"     =~ ^[0-9]+$ ]] || SWAP_USED=0
+
+    # 计算使用率百分比
+    if (( MEM_TOTAL > 0 )); then
+        MEM_PERCENT=$(( (MEM_TOTAL - MEM_AVAILABLE) * 100 / MEM_TOTAL ))
+    else
+        MEM_PERCENT=0
+    fi
+
+    if (( SWAP_TOTAL > 0 )); then
+        SWAP_PERCENT=$(( SWAP_USED * 100 / SWAP_TOTAL ))
+    else
+        SWAP_PERCENT=0
+    fi
+}
+
+# 3. 查询 NPU 状态 (负载与频率)
+# 读取全局变量: NPU_LOAD_FILE, NPU_FREQ_FILE
+# 写入全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ
+query_npu_status() {
+    if [[ -f "$NPU_LOAD_FILE" ]]; then
+        # 解析负载 (Core0, Core1, Core2)
+        read -r NPU_CORE0_LOAD NPU_CORE1_LOAD NPU_CORE2_LOAD <<< $(awk '{gsub(/%|,/,""); print $4, $6, $8}' "$NPU_LOAD_FILE" 2>/dev/null)
+    else
+        NPU_CORE0_LOAD=0; NPU_CORE1_LOAD=0; NPU_CORE2_LOAD=0
+    fi
+
+    # 解析频率
+    if [[ -f "$NPU_FREQ_FILE" ]]; then
+        NPU_FREQ=$(awk '{printf "%.2f", $1/1000000000}' "$NPU_FREQ_FILE" 2>/dev/null)
+    else
+        NPU_FREQ="N/A"
+    fi
+}
+
+# 4. 查询 GPU 状态 (负载与频率)
+# 读取全局变量: GPU_FILE
+# 写入全局变量: GPU_LOAD, GPU_FREQ
+query_gpu_status() {
+    if [[ -f "$GPU_FILE" ]]; then
+        # GPU 文件格式通常为 "Load@FreqHz"，例如 "120@800000000"
+        read -r GPU_LOAD GPU_FREQ <<< $(cat "$GPU_FILE" | awk -F'@' '{gsub(/Hz/, "", $2); printf "%d %.2f", $1, $2/1000000000}')
+    else
+        GPU_LOAD=0
+        GPU_FREQ="N/A"
+    fi
+}
+
+# 5. 查询 RGA 状态 (负载与频率)
+# 读取全局变量: RGA_LOAD_FILE, CLK_SUMMARY_FILE
+# 写入全局变量: RGA_LOAD0, RGA_LOAD1, RGA_LOAD2, RGA_FREQ0, RGA_FREQ1, RGA_FREQ2
+query_rga_status() {
+    # 3.1 解析负载
+    if [[ -f "$RGA_LOAD_FILE" ]]; then
+        # 匹配 load = 后面是数字的行, 使用数组 () 接收多行输出：
+        local rga_loads=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
+
+        # 【修复点】安全取值，带默认值
+        RGA_LOAD0=${rga_loads[0]:-0}
+        RGA_LOAD1=${rga_loads[1]:-0}
+        RGA_LOAD2=${rga_loads[2]:-0}
+    else
+        RGA_LOAD0=0; RGA_LOAD1=0; RGA_LOAD2=0
+    fi
+
+    # 【修复点】二次校验确保是纯数字
+    [[ "$RGA_LOAD0" =~ ^[0-9]+$ ]] || RGA_LOAD0=0
+    [[ "$RGA_LOAD1" =~ ^[0-9]+$ ]] || RGA_LOAD1=0
+    [[ "$RGA_LOAD2" =~ ^[0-9]+$ ]] || RGA_LOAD2=0
+
+    # 3.2 解析频率
+    local clk_data=$(cat /sys/kernel/debug/clk/clk_summary | grep rga)
+
+    RGA_FREQ0=$(echo "$clk_data" | awk '$1 == "clk_rga3_0_core" {printf "%.2f", $5/1000000000}')
+    RGA_FREQ1=$(echo "$clk_data" | awk '$1 == "clk_rga3_1_core" {printf "%.2f", $5/1000000000}')
+    RGA_FREQ2=$(echo "$clk_data" | awk '$1 == "clk_rga2_core" {printf "%.2f", $5/1000000000}')
+}
+
+
 
 
 # 显示函数
@@ -456,14 +524,48 @@ display_cpu_temperature() {
     echo -e ""
 }
 
+# 显示内存状态
+# 读取全局变量: MEM_TOTAL, MEM_USED, MEM_PERCENT, SWAP_TOTAL, SWAP_USED, SWAP_PERCENT
+#                TERM_COLS, WIDE_BAR_OVERHEAD, BAR_WIDTH_BASE, WIDE_BAR_MAX
+# 写入全局变量: (无)
+display_memory_status() {
+    echo -e " Memory Status:"
+
+    # ---- 计算宽条长度 ----
+    # 一行格式: "  LABEL: [=======   ]  xx%  X.XG/X.XG"
+    #            ^2  ^6   ^1  ^            ^4  ^2  ^~11     = 约 35 字符固定开销
+    # 宽条 = 终端列数 - 固定开销，然后钳位在 [BASE, MAX] 范围内
+    local wide_bar=$(( TERM_COLS - WIDE_BAR_OVERHEAD ))
+    if (( wide_bar < BAR_WIDTH_BASE )); then
+        wide_bar=$BAR_WIDTH_BASE
+    fi
+
+    # 将 KB 转换为可读格式 (GB, 保留 1 位小数)
+    local mem_used_gb mem_total_gb swap_used_gb swap_total_gb
+    mem_used_gb=$(awk "BEGIN {printf \"%.1f\", $MEM_USED/1048576}")
+    mem_total_gb=$(awk "BEGIN {printf \"%.1f\", $MEM_TOTAL/1048576}")
+    swap_used_gb=$(awk "BEGIN {printf \"%.1f\", $SWAP_USED/1048576}")
+    swap_total_gb=$(awk "BEGIN {printf \"%.1f\", $SWAP_TOTAL/1048576}")
+
+    # 固定宽度标签，保证冒号对齐
+    printf "  %-5s: " "RAM"
+    draw_bar "$MEM_PERCENT" "$wide_bar"
+    printf " %3d%%  %sG/%sG\n" "$MEM_PERCENT" "$mem_used_gb" "$mem_total_gb"
+
+    printf "  %-5s: " "Swap"
+    draw_bar "$SWAP_PERCENT" "$wide_bar"
+    printf " %3d%%  %sG/%sG\n" "$SWAP_PERCENT" "$swap_used_gb" "$swap_total_gb"
+    echo -e ""
+}
+
 # 显示 NPU 状态
 # 读取全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ, NPU_TEMP
 # 写入全局变量: (无)
 display_npu_status() {
     echo -e " NPU Status:"
-    printf "  Core0: "; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
-    printf "  Core1: "; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
-    printf "  Core2: "; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
+    printf "  %-5s: " "Core0"; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
+    printf "  %-5s: " "Core1"; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
+    printf "  %-5s: " "Core2"; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
     printf "  NPU temperature: %s \n"  "$NPU_TEMP"
     echo -e ""
 }
@@ -473,7 +575,7 @@ display_npu_status() {
 # 写入全局变量: (无)
 display_gpu_status() {
     echo -e " GPU Status:"
-    printf "  Util : "; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
+    printf "  %-5s: " "Util"; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
     printf "  GPU temperature: %s \n"  "$GPU_TEMP"
     echo -e ""
 }
@@ -483,22 +585,33 @@ display_gpu_status() {
 # 写入全局变量: (无)
 display_rga_status() {
     echo -e " RGA Status (Video Proc):"
-    printf "  RGA3_0: "; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
-    printf "  RGA3_1: "; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
-    printf "  RGA2  : "; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
+    printf "  %-6s: " "RGA3_0"; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
+    printf "  %-6s: " "RGA3_1"; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
+    printf "  %-6s: " "RGA2"  ; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
 }
 
 
+
+
 # 清屏重绘函数 (由 SIGWINCH 信号触发)
-# 读取全局变量: (无，通过调用 get_term_size / calc_bar_width 间接读写)
+# 读取全局变量: REDRAW_LOCK (重入保护)
 # 写入全局变量: (无，通过调用 get_term_size / calc_bar_width 间接读写)
 redraw_screen() {
+    # 重入保护：防止 SIGWINCH 在 $((...)) / $(...) 执行期间再次触发，
+    # 导致 bash 解析器在嵌套括号中出现竞态而报错
+    if (( REDRAW_LOCK )); then
+        return
+    fi
+    REDRAW_LOCK=1
+
     clear  # 清屏
     tput cup 0 0  # 将光标移回左上角
 
     get_term_size
     calc_bar_width
     calculate_layout
+
+    REDRAW_LOCK=0
 }
 
 # 捕获 SIGWINCH 信号，窗口大小变化时调用 redraw_screen 函数
@@ -521,6 +634,7 @@ while true; do
     query_gpu_status
     query_rga_status
     query_cpu_status
+    query_memory_status
 
     query_temperature
 
@@ -534,6 +648,11 @@ while true; do
     fi
     if (( SHOW_CPU_TEMP )); then
         display_cpu_temperature
+    fi
+
+    # --- Memory 区域 ---
+    if (( SHOW_MEM )); then
+        display_memory_status
     fi
 
     # --- NPU 区域 ---
@@ -557,6 +676,7 @@ while true; do
     (( SHOW_RGA      )) || hidden_mods+="RGA "
     (( SHOW_GPU      )) || hidden_mods+="GPU "
     (( SHOW_NPU      )) || hidden_mods+="NPU "
+    (( SHOW_MEM      )) || hidden_mods+="MEM "
     (( SHOW_CPU_TEMP )) || hidden_mods+="CPU_Temp "
     if [[ -n "$hidden_mods" ]]; then
         echo -e " (hidden: $hidden_mods)"
