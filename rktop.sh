@@ -91,6 +91,35 @@ REFRESH_TIME=0.5
 
 BAR_WIDTH=BAR_WIDTH_BASE
 
+# --- 布局管理：模块显示高度与可见性 ---
+# 各模块固定行数（不含动态部分）
+HDR_LINES=2        # 标题行 + 分隔线
+FTR_LINES=3        # 分隔线 + 退出提示
+
+# CPU 模块高度组成：标题(1) + ceil(cores/2) 行核心对 + 温度(4)
+CPU_STATUS_HDR=1
+CPU_TEMP_LINES=4
+
+# NPU 模块：标题(1) + 3核心行(3) + 温度行(1) + 空行(1)
+NPU_LINES=6
+
+# GPU 模块：标题(1) + 利用率行(1) + 温度行(1) + 空行(1)
+GPU_LINES=4
+
+# RGA 模块：标题(1) + 3通道行(3)
+RGA_LINES=4
+
+# 可见性标志：1=显示, 0=隐藏
+SHOW_CPU=1
+SHOW_CPU_TEMP=1
+SHOW_NPU=1
+SHOW_GPU=1
+SHOW_RGA=1
+
+# 记录当前总行数预算与实际占用
+LAYOUT_BUDGET=0
+LAYOUT_USED=0
+
 
 
 
@@ -133,6 +162,64 @@ calc_bar_width() {
     else
         BAR_WIDTH=$available
     fi
+}
+
+# 预检测 CPU 核心数（无需等待首次 query_cpu_status）
+# 读取全局变量: PROC_STAT_FILE
+# 写入全局变量: CPU_CORE_COUNT
+detect_cpu_cores() {
+    CPU_CORE_COUNT=$(grep -c "^cpu[0-9]" "$PROC_STAT_FILE" 2>/dev/null)
+    # 保底值
+    [[ "$CPU_CORE_COUNT" =~ ^[0-9]+$ ]] || CPU_CORE_COUNT=4
+}
+
+# 计算 CPU 模块总行数（依赖 CPU_CORE_COUNT）
+# 读取全局变量: CPU_CORE_COUNT, CPU_STATUS_HDR, CPU_TEMP_LINES
+# 输出: cpu 模块行数
+cpu_module_lines() {
+    local cpu_status_lines=$(( CPU_STATUS_HDR + (CPU_CORE_COUNT + 1) / 2 ))
+    echo $(( cpu_status_lines + CPU_TEMP_LINES ))
+}
+
+# 动态布局计算：根据终端高度决定各模块显隐
+# 隐藏优先级（越低越先被隐藏）：
+#   RGA < GPU < NPU < CPU_TEMP < CPU_STATUS (永不隐藏)
+# 读取全局变量: TERM_LINES, HDR_LINES, FTR_LINES, SHOW_*, LAYOUT_*
+# 写入全局变量: SHOW_CPU, SHOW_CPU_TEMP, SHOW_NPU, SHOW_GPU, SHOW_RGA, LAYOUT_BUDGET, LAYOUT_USED
+calculate_layout() {
+    LAYOUT_BUDGET=$TERM_LINES
+    LAYOUT_USED=$(( HDR_LINES + FTR_LINES ))
+
+    # 全部先设为显示
+    SHOW_CPU=1
+    SHOW_CPU_TEMP=1
+    SHOW_NPU=1
+    SHOW_GPU=1
+    SHOW_RGA=1
+
+    # 累加所有模块
+    local cpu_lines
+    cpu_lines=$(cpu_module_lines)
+    LAYOUT_USED=$(( LAYOUT_USED + cpu_lines + NPU_LINES + GPU_LINES + RGA_LINES ))
+
+    # 按优先级从低到高依次隐藏
+    if (( LAYOUT_USED > LAYOUT_BUDGET )); then
+        SHOW_RGA=0
+        LAYOUT_USED=$(( LAYOUT_USED - RGA_LINES ))
+    fi
+    if (( LAYOUT_USED > LAYOUT_BUDGET )); then
+        SHOW_GPU=0
+        LAYOUT_USED=$(( LAYOUT_USED - GPU_LINES ))
+    fi
+    if (( LAYOUT_USED > LAYOUT_BUDGET )); then
+        SHOW_NPU=0
+        LAYOUT_USED=$(( LAYOUT_USED - NPU_LINES ))
+    fi
+    if (( LAYOUT_USED > LAYOUT_BUDGET )); then
+        SHOW_CPU_TEMP=0
+        LAYOUT_USED=$(( LAYOUT_USED - CPU_TEMP_LINES ))
+    fi
+    # CPU status 永不隐藏
 }
 
 # 绘制进度条函数
@@ -357,10 +444,7 @@ display_cpu_status() {
 
         done
     fi
-
-
 }
-
 
 # 显示 CPU 温度
 # 读取全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP
@@ -414,6 +498,7 @@ redraw_screen() {
 
     get_term_size
     calc_bar_width
+    calculate_layout
 }
 
 # 捕获 SIGWINCH 信号，窗口大小变化时调用 redraw_screen 函数
@@ -422,6 +507,9 @@ trap redraw_screen SIGWINCH
 # 初始化终端
 tput civis
 trap 'tput cnorm; exit' INT EXIT
+
+# --- 预检测 CPU 核心数（供布局计算使用）---
+detect_cpu_cores
 
 # --- 主循环 ---
 redraw_screen
@@ -440,21 +528,41 @@ while true; do
     echo -e " Rockchip Monitor (Refresh: "$REFRESH_TIME"s)\t\tTime: $(date +"%H:%M:%S")"
     echo -e "--------------------"
 
-    # --- CPU 区域 (平均分成两列，制表符间隔) ---
-    display_cpu_status
-    display_cpu_temperature
+    # --- CPU 区域 ---
+    if (( SHOW_CPU )); then
+        display_cpu_status
+    fi
+    if (( SHOW_CPU_TEMP )); then
+        display_cpu_temperature
+    fi
 
     # --- NPU 区域 ---
-    display_npu_status
+    if (( SHOW_NPU )); then
+        display_npu_status
+    fi
 
     # --- GPU 区域 ---
-    display_gpu_status
+    if (( SHOW_GPU )); then
+        display_gpu_status
+    fi
 
     # --- RGA 区域 ---
-    display_rga_status
+    if (( SHOW_RGA )); then
+        display_rga_status
+    fi
 
     echo -e "--------------------"
-    echo -e " Press Ctrl+C to exit..."
+    # 若存在被隐藏的模块，给出提示
+    hidden_mods=""
+    (( SHOW_RGA      )) || hidden_mods+="RGA "
+    (( SHOW_GPU      )) || hidden_mods+="GPU "
+    (( SHOW_NPU      )) || hidden_mods+="NPU "
+    (( SHOW_CPU_TEMP )) || hidden_mods+="CPU_Temp "
+    if [[ -n "$hidden_mods" ]]; then
+        echo -e " (hidden: $hidden_mods)"
+    else
+        echo -e " Press Ctrl+C to exit..."
+    fi
 
     sleep $REFRESH_TIME
 done
