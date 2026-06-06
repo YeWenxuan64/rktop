@@ -17,7 +17,19 @@ PROC_STAT_FILE="/proc/stat"
 CPU_FREQ_BASE_PATH="/sys/devices/system/cpu"
 
 
-# --- 全局变量定义 (用于存储各设备状态) ---
+# 设备状态全局变量定义
+# CPU (使用数组以支持动态核心数)
+declare -a CPU_LOAD
+declare -a CPU_FREQ
+declare -a CPU_PREV_TOTAL
+declare -a CPU_PREV_IDLE
+CPU_CORE_COUNT=0
+CPU_FIRST_RUN=1
+SOC_TEMP=0
+LITTLE_CORE_TEMP=0
+BIG_CORE0_TEMP=0
+BIG_CORE1_TEMP=0
+
 # NPU
 NPU_CORE0_LOAD=0
 NPU_CORE1_LOAD=0
@@ -38,17 +50,7 @@ RGA_FREQ0="N/A"
 RGA_FREQ1="N/A"
 RGA_FREQ2="N/A"
 
-# CPU (使用数组以支持动态核心数，但放置位置模仿原始脚本全局变量区)
-declare -a CPU_LOAD
-declare -a CPU_FREQ
-declare -a CPU_PREV_TOTAL
-declare -a CPU_PREV_IDLE
-CPU_CORE_COUNT=0
-CPU_FIRST_RUN=1
-SOC_TEMP=0
-LITTLE_CORE_TEMP=0
-BIG_CORE0_TEMP=0
-BIG_CORE1_TEMP=0
+
 
 # --- 权限检查与自动提权 ---
 # 如果脚本不是以 root 身份运行，则使用 sudo 重新执行自身
@@ -73,7 +75,11 @@ if [[ ! -f "$PROC_STAT_FILE" ]]; then echo "警告：找不到 $PROC_STAT_FILE �
 
 
 
-# === 自适应配置 ===
+# 自适应配置
+# 终端尺寸全局变量
+TERM_LINES=24
+TERM_COLS=80
+
 # 进度条最小宽度（终端过窄时的保底值）
 BAR_WIDTH_BASE=5
 # 进度条最大宽度（避免窗口过大时进度条太长）
@@ -83,17 +89,42 @@ LAYOUT_MARGIN=65
 # 刷新时间 (秒)
 REFRESH_TIME=0.5
 
+BAR_WIDTH=BAR_WIDTH_BASE
 
-# 终端尺寸全局变量
-TERM_LINES=24
-TERM_COLS=80
+
+
+
+# 功能函数
+
+# 更新终端尺寸 (行数和列数)
+# 读取全局变量: (无，使用 tput 和环境变量 LINES/COLUMNS)
+# 写入全局变量: TERM_LINES, TERM_COLS
+get_term_size() {
+    # 会写入全局变量 TERM_LINES 和 TERM_COLS
+    
+    local lines cols
+    # 获取行数 (高度)
+    if lines=$(tput lines 2>/dev/null); then
+        TERM_LINES=$lines
+    elif [[ -n "$LINES" ]]; then
+        TERM_LINES=$LINES
+    fi
+
+    # 获取列数 (宽度)
+    if cols=$(tput cols 2>/dev/null); then
+        TERM_COLS=$cols
+    elif [[ -n "$COLUMNS" ]]; then
+        TERM_COLS=$COLUMNS
+    fi
+}
 
 # 动态计算 BAR_WIDTH
+# 读取全局变量: TERM_COLS, LAYOUT_MARGIN, BAR_WIDTH_BASE, BAR_WIDTH_MAX
+# 写入全局变量: BAR_WIDTH
 calc_bar_width() {
-    # 使用全局变量 TERM_COLS
-
     # 双列布局时，每列可用宽度 = (总宽 - 边距) / 2
     local available=$(( (TERM_COLS - LAYOUT_MARGIN) / 2 ))
+
     # 限制范围
     if (( available < BAR_WIDTH_BASE )); then
         BAR_WIDTH=$BAR_WIDTH_BASE
@@ -104,10 +135,9 @@ calc_bar_width() {
     fi
 }
 
-
-# --- 功能函数 ---
-
 # 绘制进度条函数
+# 读取全局变量: BAR_WIDTH
+# 写入全局变量: (无)
 draw_bar() {
     local percent=$1
     if ! [[ "$percent" =~ ^[0-9]+$ ]]; then
@@ -153,9 +183,13 @@ draw_bar() {
 }
 
 
+
+
 # --- 设备查询函数 ---
 
 # 1. 查询 NPU 状态 (负载与频率)
+# 读取全局变量: NPU_LOAD_FILE, NPU_FREQ_FILE
+# 写入全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ
 query_npu_status() {
     if [[ -f "$NPU_LOAD_FILE" ]]; then
         # 解析负载 (Core0, Core1, Core2)
@@ -173,6 +207,8 @@ query_npu_status() {
 }
 
 # 2. 查询 GPU 状态 (负载与频率)
+# 读取全局变量: GPU_FILE
+# 写入全局变量: GPU_LOAD, GPU_FREQ
 query_gpu_status() {
     if [[ -f "$GPU_FILE" ]]; then
         # GPU 文件格式通常为 "Load@FreqHz"，例如 "120@800000000"
@@ -184,6 +220,8 @@ query_gpu_status() {
 }
 
 # 3. 查询 RGA 状态 (负载与频率)
+# 读取全局变量: RGA_LOAD_FILE, CLK_SUMMARY_FILE
+# 写入全局变量: RGA_LOAD0, RGA_LOAD1, RGA_LOAD2, RGA_FREQ0, RGA_FREQ1, RGA_FREQ2
 query_rga_status() {
     # 3.1 解析负载
     if [[ -f "$RGA_LOAD_FILE" ]]; then
@@ -212,6 +250,8 @@ query_rga_status() {
 }
 
 # 4. 查询 CPU 状态 (负载与频率)
+# 读取全局变量: PROC_STAT_FILE, CPU_FREQ_BASE_PATH, CPU_FIRST_RUN, CPU_PREV_TOTAL[], CPU_PREV_IDLE[]
+# 写入全局变量: CPU_CORE_COUNT, CPU_LOAD[], CPU_FREQ[], CPU_PREV_TOTAL[], CPU_PREV_IDLE[], CPU_FIRST_RUN
 query_cpu_status() {
     # 4.1 检测核心数量
     CPU_CORE_COUNT=$(grep -c "^cpu[0-9]" "$PROC_STAT_FILE")
@@ -262,7 +302,31 @@ query_cpu_status() {
     CPU_FIRST_RUN=0
 }
 
+# 5. 查询温度
+# 读取全局变量: (无，调用 sensors 命令)
+# 写入全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP, NPU_TEMP, GPU_TEMP
+query_temperature() {
+    local sensors_output
+    sensors_output=$(sensors)
+
+    SOC_TEMP=$(echo "$sensors_output" | awk '/^soc_thermal/{getline; getline; print $2}')
+    LITTLE_CORE_TEMP=$(echo "$sensors_output" | awk '/^littlecore_thermal/{getline; getline; print $2}')
+    BIG_CORE0_TEMP=$(echo "$sensors_output" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
+    BIG_CORE1_TEMP=$(echo "$sensors_output" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
+
+    NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
+    GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
+}
+
+
+# 显示函数
+
+# 显示 CPU 状态 (双列布局)
+# 读取全局变量: CPU_CORE_COUNT, CPU_LOAD[], CPU_FREQ[]
+# 写入全局变量: (无)
 display_cpu_status() {
+    echo -e " CPU Status:"
+
     if [[ $CPU_CORE_COUNT -gt 0 ]]; then
         # 计算分列点，左半部分和右半部分
         half=$(( (CPU_CORE_COUNT + 1) / 2 ))
@@ -293,45 +357,57 @@ display_cpu_status() {
 
         done
     fi
-}
 
-# 5. 查询温度
-query_temperature() {
-    local sensors_output
-    sensors_output=$(sensors)
 
-    SOC_TEMP=$(echo "$sensors_output" | awk '/^soc_thermal/{getline; getline; print $2}')
-    LITTLE_CORE_TEMP=$(echo "$sensors_output" | awk '/^littlecore_thermal/{getline; getline; print $2}')
-    BIG_CORE0_TEMP=$(echo "$sensors_output" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
-    BIG_CORE1_TEMP=$(echo "$sensors_output" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
-
-    NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
-    GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
 }
 
 
-# 更新终端尺寸 (行数和列数)
-get_term_size() {
-    # 会写入全局变量 TERM_LINES 和 TERM_COLS
-    
-    local lines cols
-    # 获取行数 (高度)
-    if lines=$(tput lines 2>/dev/null); then
-        TERM_LINES=$lines
-    elif [[ -n "$LINES" ]]; then
-        TERM_LINES=$LINES
-    fi
+# 显示 CPU 温度
+# 读取全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP
+# 写入全局变量: (无)
+display_cpu_temperature() {
+    printf "  SOC temperature: %s \n"  "$SOC_TEMP"
+    printf "  Little cores temperature: %s \n"  "$LITTLE_CORE_TEMP"
+    printf "  Big core0 temperature: %s \t Big core1 temperature: %s \n"  "$BIG_CORE0_TEMP" "$BIG_CORE1_TEMP"
+    echo -e ""
+}
 
-    # 获取列数 (宽度)
-    if cols=$(tput cols 2>/dev/null); then
-        TERM_COLS=$cols
-    elif [[ -n "$COLUMNS" ]]; then
-        TERM_COLS=$COLUMNS
-    fi
+# 显示 NPU 状态
+# 读取全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ, NPU_TEMP
+# 写入全局变量: (无)
+display_npu_status() {
+    echo -e " NPU Status:"
+    printf "  Core0: "; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
+    printf "  Core1: "; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
+    printf "  Core2: "; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
+    printf "  NPU temperature: %s \n"  "$NPU_TEMP"
+    echo -e ""
+}
+
+# 显示 GPU 状态
+# 读取全局变量: GPU_LOAD, GPU_FREQ, GPU_TEMP
+# 写入全局变量: (无)
+display_gpu_status() {
+    echo -e " GPU Status:"
+    printf "  Util : "; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
+    printf "  GPU temperature: %s \n"  "$GPU_TEMP"
+    echo -e ""
+}
+
+# 显示 RGA 状态
+# 读取全局变量: RGA_LOAD0, RGA_LOAD1, RGA_LOAD2, RGA_FREQ0, RGA_FREQ1, RGA_FREQ2
+# 写入全局变量: (无)
+display_rga_status() {
+    echo -e " RGA Status (Video Proc):"
+    printf "  RGA3_0: "; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
+    printf "  RGA3_1: "; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
+    printf "  RGA2  : "; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
 }
 
 
-# 定义清屏重绘函数
+# 清屏重绘函数 (由 SIGWINCH 信号触发)
+# 读取全局变量: (无，通过调用 get_term_size / calc_bar_width 间接读写)
+# 写入全局变量: (无，通过调用 get_term_size / calc_bar_width 间接读写)
 redraw_screen() {
     clear  # 清屏
     tput cup 0 0  # 将光标移回左上角
@@ -365,32 +441,17 @@ while true; do
     echo -e "--------------------"
 
     # --- CPU 区域 (平均分成两列，制表符间隔) ---
-    echo -e " CPU Status:"
     display_cpu_status
-    printf "  SOC temperature: %s \n"  "$SOC_TEMP"
-    printf "  Little cores temperature: %s \n"  "$LITTLE_CORE_TEMP"
-    printf "  Big core0 temperature: %s \t Big core1 temperature: %s \n"  "$BIG_CORE0_TEMP" "$BIG_CORE1_TEMP"
-    echo -e ""
+    display_cpu_temperature
 
     # --- NPU 区域 ---
-    echo -e " NPU Status:"
-    printf "  Core0: "; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
-    printf "  Core1: "; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
-    printf "  Core2: "; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
-    printf "  NPU temperature: %s \n"  "$NPU_TEMP"
-    echo -e ""
+    display_npu_status
 
     # --- GPU 区域 ---
-    echo -e " GPU Status:"
-    printf "  Util : "; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
-    printf "  GPU temperature: %s \n"  "$GPU_TEMP"
-    echo -e ""
+    display_gpu_status
 
     # --- RGA 区域 ---
-    echo -e " RGA Status (Video Proc):"
-    printf "  RGA3_0: "; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
-    printf "  RGA3_1: "; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
-    printf "  RGA2  : "; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
+    display_rga_status
 
     echo -e "--------------------"
     echo -e " Press Ctrl+C to exit..."
