@@ -216,9 +216,7 @@ calc_bar_width() {
 # 读取全局变量: PROC_STAT_FILE
 # 写入全局变量: CPU_CORE_COUNT
 detect_cpu_cores() {
-    CPU_CORE_COUNT=$(grep -c "^cpu[0-9]" "$PROC_STAT_FILE" 2>/dev/null)
-    # 保底值
-    [[ "$CPU_CORE_COUNT" =~ ^[0-9]+$ ]] || CPU_CORE_COUNT=4
+    CPU_CORE_COUNT=$(grep -c "^cpu[0-9]" "$PROC_STAT_FILE")
 }
 
 # 计算 CPU 模块总行数（依赖 CPU_CORE_COUNT）
@@ -282,8 +280,15 @@ calculate_layout() {
 draw_bar() {
     local percent=$1
     local width=${2:-$BAR_WIDTH}
-    if ! [[ "$percent" =~ ^[0-9]+$ ]]; then
-        percent=0;
+
+    if ! [[ "$percent" =~ ^[0-9] ]]; then
+        percent=-1;
+    fi
+
+    # 当百分比为 -1 时显示 [ N/A ] 而不是进度条
+    if (( percent == -1 )); then
+        printf "${CYAN}[${NC} N/A ${CYAN}]${NC}"
+        return
     fi
 
     local filled=$((percent * width / 100))
@@ -325,12 +330,9 @@ draw_bar() {
 
 # 1. 查询 CPU 状态 (负载与频率)
 # 读取全局变量: PROC_STAT_FILE, CPU_FREQ_BASE_PATH, CPU_FIRST_RUN, CPU_PREV_TOTAL[], CPU_PREV_IDLE[]
-# 写入全局变量: CPU_CORE_COUNT, CPU_LOAD[], CPU_FREQ[], CPU_PREV_TOTAL[], CPU_PREV_IDLE[], CPU_FIRST_RUN
+# 写入全局变量: CPU_LOAD[], CPU_FREQ[], CPU_PREV_TOTAL[], CPU_PREV_IDLE[], CPU_FIRST_RUN
 query_cpu_status() {
-    # 4.1 检测核心数量
-    CPU_CORE_COUNT=$(grep -c "^cpu[0-9]" "$PROC_STAT_FILE")
-
-    # 4.2 读取当前统计信息
+    # 4.1 读取当前统计信息
     local idx=0
     while read -r line; do
         # 跳过聚合行 "cpu " (注意 cpu 后面有空格)
@@ -360,7 +362,7 @@ query_cpu_status() {
             CPU_PREV_TOTAL[$idx]=$curr_total
             CPU_PREV_IDLE[$idx]=$curr_idle
 
-            # 4.3 读取频率
+            # 4.2 读取频率
             local freq_file="$CPU_FREQ_BASE_PATH/cpu${idx}/cpufreq/scaling_cur_freq"
             if [[ -f "$freq_file" ]]; then
                 local freq_khz=$(cat "$freq_file" 2>/dev/null)
@@ -428,7 +430,7 @@ query_npu_status() {
         # 解析负载 (Core0, Core1, Core2)
         read -r NPU_CORE0_LOAD NPU_CORE1_LOAD NPU_CORE2_LOAD <<< $(awk '{gsub(/%|,/,""); print $4, $6, $8}' "$NPU_LOAD_FILE" 2>/dev/null)
     else
-        NPU_CORE0_LOAD=0; NPU_CORE1_LOAD=0; NPU_CORE2_LOAD=0
+        NPU_CORE0_LOAD=-1; NPU_CORE1_LOAD=-1; NPU_CORE2_LOAD=-1
     fi
 
     # 解析频率
@@ -447,7 +449,7 @@ query_gpu_status() {
         # GPU 文件格式通常为 "Load@FreqHz"，例如 "120@800000000"
         read -r GPU_LOAD GPU_FREQ <<< $(cat "$GPU_FILE" | awk -F'@' '{gsub(/Hz/, "", $2); printf "%d %.2f", $1, $2/1000000000}')
     else
-        GPU_LOAD=0
+        GPU_LOAD=-1
         GPU_FREQ="N/A"
     fi
 }
@@ -461,25 +463,23 @@ query_rga_status() {
         # 匹配 load = 后面是数字的行, 使用数组 () 接收多行输出：
         local rga_loads=( $(cat "$RGA_LOAD_FILE" | awk '/load = [0-9]/ {print $3}' | tr -d '%') )
 
-        # 【修复点】安全取值，带默认值
-        RGA_LOAD0=${rga_loads[0]:-0}
-        RGA_LOAD1=${rga_loads[1]:-0}
-        RGA_LOAD2=${rga_loads[2]:-0}
+        RGA_LOAD0=${rga_loads[0]}
+        RGA_LOAD1=${rga_loads[1]}
+        RGA_LOAD2=${rga_loads[2]}
     else
-        RGA_LOAD0=0; RGA_LOAD1=0; RGA_LOAD2=0
+        RGA_LOAD0=-1; RGA_LOAD1=-1; RGA_LOAD2=-1
     fi
 
-    # 【修复点】二次校验确保是纯数字
-    [[ "$RGA_LOAD0" =~ ^[0-9]+$ ]] || RGA_LOAD0=0
-    [[ "$RGA_LOAD1" =~ ^[0-9]+$ ]] || RGA_LOAD1=0
-    [[ "$RGA_LOAD2" =~ ^[0-9]+$ ]] || RGA_LOAD2=0
-
     # 3.2 解析频率
-    local clk_data=$(cat /sys/kernel/debug/clk/clk_summary | grep rga)
+    if [[ -f "$CLK_SUMMARY_FILE" ]]; then
+        local clk_data=$(cat $CLK_SUMMARY_FILE | grep rga)
 
-    RGA_FREQ0=$(echo "$clk_data" | awk '$1 == "clk_rga3_0_core" {printf "%.2f", $5/1000000000}')
-    RGA_FREQ1=$(echo "$clk_data" | awk '$1 == "clk_rga3_1_core" {printf "%.2f", $5/1000000000}')
-    RGA_FREQ2=$(echo "$clk_data" | awk '$1 == "clk_rga2_core" {printf "%.2f", $5/1000000000}')
+        RGA_FREQ0=$(echo "$clk_data" | awk '$1 == "clk_rga3_0_core" {printf "%.2f", $5/1000000000}')
+        RGA_FREQ1=$(echo "$clk_data" | awk '$1 == "clk_rga3_1_core" {printf "%.2f", $5/1000000000}')
+        RGA_FREQ2=$(echo "$clk_data" | awk '$1 == "clk_rga2_core" {printf "%.2f", $5/1000000000}')
+    else
+        RGA_FREQ0="N/A"; RGA_FREQ1="N/A"; RGA_FREQ2="N/A"
+    fi
 }
 
 
