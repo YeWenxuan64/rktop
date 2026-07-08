@@ -3,10 +3,14 @@
 # --- 配置路径 ---
 # NPU
 NPU_LOAD_FILE="/sys/kernel/debug/rknpu/load"
-NPU_FREQ_FILE="/sys/class/devfreq/fdab0000.npu/cur_freq"
+# NPU_FREQ_FILE="/sys/class/devfreq/fdab0000.npu/cur_freq"
+# 自动匹配 NPU 设备的频率路径
+NPU_FREQ_FILE=$(ls /sys/class/devfreq/*.npu/cur_freq 2>/dev/null | head -1)
 
 # GPU
-GPU_FILE="/sys/class/devfreq/fb000000.gpu/load"
+# GPU_FILE="/sys/class/devfreq/fb000000.gpu/load"
+# 自动匹配 GPU 设备的频率路径
+GPU_FILE=$(ls /sys/class/devfreq/*.gpu/load 2>/dev/null | head -1)
 
 # RGA (视频处理)
 RGA_LOAD_FILE="/sys/kernel/debug/rkrga/load"
