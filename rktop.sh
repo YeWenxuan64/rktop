@@ -79,35 +79,38 @@ fi
 
 
 # ---文件检查 ---
-
+FILE_LOST=0
 if [[ ! -f "$NPU_LOAD_FILE" ]]; then
-    echo "Warning: NPU load file not found"
-    sleep 1
+    echo "Warning: NPU load file: $NPU_LOAD_FILE not found"
+    FILE_LOST=1
 fi
 if [[ ! -f "$NPU_FREQ_FILE" ]]; then
-    echo "Warning: NPU freq file not found"
-    sleep 1
+    echo "Warning: NPU freq file: $NPU_FREQ_FILE not found"
+    FILE_LOST=1
 fi
 
 if [[ ! -f "$GPU_FILE" ]]; then
-    echo "Warning: GPU load file not found"
-    sleep 1
+    echo "Warning: GPU load file: $GPU_FILE not found"
+    FILE_LOST=1
 fi
 
 if [[ ! -f "$RGA_LOAD_FILE" ]]; then
-    echo "Warning: RGA load file not found"
-    sleep 1
+    echo "Warning: RGA load file: $RGA_LOAD_FILE not found"
+    FILE_LOST=1
 fi
 if [[ ! -f "$CLK_SUMMARY_FILE" ]]; then
-    echo "Warning: RGA clk_summary file not found"
-    sleep 1
+    echo "Warning: Clock Summary (RGA) file: $CLK_SUMMARY_FILE not found"
+    FILE_LOST=1
 fi
 
 if [[ ! -f "$PROC_STAT_FILE" ]]; then
-    echo "Warning: $PROC_STAT_FILE not found"
-    sleep 1
+    echo "Warning: Process state file: $PROC_STAT_FILE not found"
+    FILE_LOST=1
 fi
 
+if (( FILE_LOST )); then
+    sleep 1
+fi
 
 
 # 自适应配置
