@@ -56,11 +56,22 @@ RGA_FREQ2="N/A"
 # sensors 原始输出（由 query_temperature 写入，各 display_xxx 函数自行解析）
 SENSORS_OUTPUT=""
 
+# 颜色定义
+RED='\033[31m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+CYAN='\033[36m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# 设置当前终端语言环境为英文，避免命令输出与解析错误
+export LC_ALL=en_US.UTF-8
 
 # --- 权限检查与自动提权 ---
 # 如果脚本不是以 root 身份运行，则使用 sudo 重新执行自身
 if [ "$(id -u)" -ne 0 ]; then
-    echo "此脚本需要 root 权限来读取 debugfs 信息。正在请求权限..."
+    echo -e "${BLUE}This script requires root privileges to read debugfs info.${NC}"
+    echo "Requesting permission..."
     # exec 命令会替换当前 shell 进程，这样在 sudo 完成后脚本就不会继续执行
     exec sudo "$0" "$@"
 fi
@@ -70,30 +81,30 @@ fi
 # ---文件检查 ---
 
 if [[ ! -f "$NPU_LOAD_FILE" ]]; then
-    echo "警告：找不到 NPU load 文件"
+    echo "Warning: NPU load file not found"
     sleep 1
 fi
 if [[ ! -f "$NPU_FREQ_FILE" ]]; then
-    echo "警告：找不到 NPU freq 文件"
+    echo "Warning: NPU freq file not found"
     sleep 1
 fi
 
 if [[ ! -f "$GPU_FILE" ]]; then
-    echo "警告：找不到 GPU load 文件"
+    echo "Warning: GPU load file not found"
     sleep 1
 fi
 
 if [[ ! -f "$RGA_LOAD_FILE" ]]; then
-    echo "警告：找不到 RGA load 文件"
+    echo "Warning: RGA load file not found"
     sleep 1
 fi
 if [[ ! -f "$CLK_SUMMARY_FILE" ]]; then
-    echo "警告：找不到 RGA clk_summary 文件"
+    echo "Warning: RGA clk_summary file not found"
     sleep 1
 fi
 
 if [[ ! -f "$PROC_STAT_FILE" ]]; then
-    echo "警告：找不到 $PROC_STAT_FILE 文件"
+    echo "Warning: $PROC_STAT_FILE not found"
     sleep 1
 fi
 
@@ -284,12 +295,6 @@ draw_bar() {
 
     local empty=$((width - filled))
 
-    # 颜色定义
-    local GREEN='\033[32m'
-    local YELLOW='\033[33m'
-    local RED='\033[31m'
-    local CYAN='\033[36m'
-    local NC='\033[0m'
 
     if (( percent > 80 )); then 
         COLOR=$RED
@@ -383,8 +388,8 @@ query_temperature() {
 # 写入全局变量: MEM_TOTAL, MEM_USED, MEM_AVAILABLE, MEM_PERCENT, SWAP_TOTAL, SWAP_USED, SWAP_PERCENT
 query_memory_status() {
     local free_output
-    # 强制英文 locale，避免中文 "内存/交换" 导致 awk 匹配失败
-    free_output=$(LANG=C free 2>/dev/null)
+    # 全局已经设置英文输出，避免中文 "内存/交换" 导致 awk 匹配失败
+    free_output=$(free 2>/dev/null)
 
     # 解析 Mem 行: total used free shared buff/cache available
     MEM_TOTAL=$(echo "$free_output" | awk '/^Mem:/ {print $2}')
