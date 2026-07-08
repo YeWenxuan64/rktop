@@ -25,30 +25,6 @@ declare -a CPU_PREV_TOTAL
 declare -a CPU_PREV_IDLE
 CPU_CORE_COUNT=0
 CPU_FIRST_RUN=1
-SOC_TEMP=0
-LITTLE_CORE_TEMP=0
-BIG_CORE0_TEMP=0
-BIG_CORE1_TEMP=0
-
-# NPU
-NPU_CORE0_LOAD=0
-NPU_CORE1_LOAD=0
-NPU_CORE2_LOAD=0
-NPU_FREQ="N/A"
-NPU_TEMP=0
-
-# GPU
-GPU_LOAD=0
-GPU_FREQ="N/A"
-GPU_TEMP=0
-
-# RGA
-RGA_LOAD0=0
-RGA_LOAD1=0
-RGA_LOAD2=0
-RGA_FREQ0="N/A"
-RGA_FREQ1="N/A"
-RGA_FREQ2="N/A"
 
 # Memory (单位: KB，由 free 命令解析)
 MEM_TOTAL=0
@@ -59,6 +35,26 @@ SWAP_TOTAL=0
 SWAP_USED=0
 SWAP_PERCENT=0
 
+# NPU
+NPU_CORE0_LOAD=0
+NPU_CORE1_LOAD=0
+NPU_CORE2_LOAD=0
+NPU_FREQ="N/A"
+
+# GPU
+GPU_LOAD=0
+GPU_FREQ="N/A"
+
+# RGA
+RGA_LOAD0=0
+RGA_LOAD1=0
+RGA_LOAD2=0
+RGA_FREQ0="N/A"
+RGA_FREQ1="N/A"
+RGA_FREQ2="N/A"
+
+# sensors 原始输出（由 query_temperature 写入，各 display_xxx 函数自行解析）
+SENSORS_OUTPUT=""
 
 
 # --- 权限检查与自动提权 ---
@@ -72,15 +68,34 @@ fi
 
 
 # ---文件检查 ---
-if [[ ! -f "$NPU_LOAD_FILE" ]]; then echo "警告：找不到 NPU load 文件"; fi
-if [[ ! -f "$NPU_FREQ_FILE" ]]; then echo "警告：找不到 NPU freq 文件"; fi
 
-if [[ ! -f "$GPU_FILE" ]]; then echo "警告：找不到 GPU load 文件"; fi
+if [[ ! -f "$NPU_LOAD_FILE" ]]; then
+    echo "警告：找不到 NPU load 文件"
+    sleep 1
+fi
+if [[ ! -f "$NPU_FREQ_FILE" ]]; then
+    echo "警告：找不到 NPU freq 文件"
+    sleep 1
+fi
 
-if [[ ! -f "$RGA_LOAD_FILE" ]]; then echo "警告：找不到 RGA load 文件"; fi
-if [[ ! -f "$CLK_SUMMARY_FILE" ]]; then echo "警告：找不到 RGA clk_summary 文件"; fi
+if [[ ! -f "$GPU_FILE" ]]; then
+    echo "警告：找不到 GPU load 文件"
+    sleep 1
+fi
 
-if [[ ! -f "$PROC_STAT_FILE" ]]; then echo "警告：找不到 $PROC_STAT_FILE 文件"; fi
+if [[ ! -f "$RGA_LOAD_FILE" ]]; then
+    echo "警告：找不到 RGA load 文件"
+    sleep 1
+fi
+if [[ ! -f "$CLK_SUMMARY_FILE" ]]; then
+    echo "警告：找不到 RGA clk_summary 文件"
+    sleep 1
+fi
+
+if [[ ! -f "$PROC_STAT_FILE" ]]; then
+    echo "警告：找不到 $PROC_STAT_FILE 文件"
+    sleep 1
+fi
 
 
 
@@ -356,20 +371,11 @@ query_cpu_status() {
     CPU_FIRST_RUN=0
 }
 
-# 1.5 查询CPU温度
+# 1.5 查询CPU温度（仅保存原始 sensors 输出，解析在各 display_xxx 函数中）
 # 读取全局变量: (无，调用 sensors 命令)
-# 写入全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP, NPU_TEMP, GPU_TEMP
+# 写入全局变量: SENSORS_OUTPUT
 query_temperature() {
-    local sensors_output
-    sensors_output=$(sensors)
-
-    SOC_TEMP=$(echo "$sensors_output" | awk '/^soc_thermal/{getline; getline; print $2}')
-    LITTLE_CORE_TEMP=$(echo "$sensors_output" | awk '/^littlecore_thermal/{getline; getline; print $2}')
-    BIG_CORE0_TEMP=$(echo "$sensors_output" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
-    BIG_CORE1_TEMP=$(echo "$sensors_output" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
-
-    NPU_TEMP=$(echo "$sensors_output" | awk '/^npu_thermal/{getline; getline; print $2}')
-    GPU_TEMP=$(echo "$sensors_output" | awk '/^gpu_thermal/{getline; getline; print $2}')
+    SENSORS_OUTPUT=$(sensors)
 }
 
 # 2. 查询内存状态 (基于 free 命令, 单位 KB)
@@ -514,13 +520,19 @@ display_cpu_status() {
     fi
 }
 
-# 显示 CPU 温度
-# 读取全局变量: SOC_TEMP, LITTLE_CORE_TEMP, BIG_CORE0_TEMP, BIG_CORE1_TEMP
+# 显示 CPU 温度（自行从 SENSORS_OUTPUT 解析）
+# 读取全局变量: SENSORS_OUTPUT
 # 写入全局变量: (无)
 display_cpu_temperature() {
-    printf "  SOC temperature: %s \n"  "$SOC_TEMP"
-    printf "  Little cores temperature: %s \n"  "$LITTLE_CORE_TEMP"
-    printf "  Big core0 temperature: %s \t Big core1 temperature: %s \n"  "$BIG_CORE0_TEMP" "$BIG_CORE1_TEMP"
+    local soc_tmp little_tmp big0_tmp big1_tmp
+    soc_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^soc_thermal/{getline; getline; print $2}')
+    little_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^littlecore_thermal/{getline; getline; print $2}')
+    big0_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^bigcore0_thermal/{getline; getline; print $2}')
+    big1_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^bigcore1_thermal/{getline; getline; print $2}')
+
+    [[ -n "$soc_tmp"    ]] && printf "  SOC temperature: %s \n"  "$soc_tmp"
+    [[ -n "$little_tmp" ]] && printf "  Little cores temperature: %s \n"  "$little_tmp"
+    [[ -n "$big0_tmp"   ]] && printf "  Big core0 temperature: %s \t Big core1 temperature: %s \n"  "$big0_tmp" "$big1_tmp"
     echo -e ""
 }
 
@@ -558,25 +570,31 @@ display_memory_status() {
     echo -e ""
 }
 
-# 显示 NPU 状态
-# 读取全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ, NPU_TEMP
+# 显示 NPU 状态（自行从 SENSORS_OUTPUT 解析温度）
+# 读取全局变量: NPU_CORE0_LOAD, NPU_CORE1_LOAD, NPU_CORE2_LOAD, NPU_FREQ, SENSORS_OUTPUT
 # 写入全局变量: (无)
 display_npu_status() {
+    local npu_tmp
+    npu_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^npu_thermal/{getline; getline; print $2}')
+
     echo -e " NPU Status:"
     printf "  %-5s: " "Core0"; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
     printf "  %-5s: " "Core1"; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
     printf "  %-5s: " "Core2"; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
-    printf "  NPU temperature: %s \n"  "$NPU_TEMP"
+    printf "  NPU temperature: %s \n"  "${npu_tmp:-N/A}"
     echo -e ""
 }
 
-# 显示 GPU 状态
-# 读取全局变量: GPU_LOAD, GPU_FREQ, GPU_TEMP
+# 显示 GPU 状态（自行从 SENSORS_OUTPUT 解析温度）
+# 读取全局变量: GPU_LOAD, GPU_FREQ, SENSORS_OUTPUT
 # 写入全局变量: (无)
 display_gpu_status() {
+    local gpu_tmp
+    gpu_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^gpu_thermal/{getline; getline; print $2}')
+
     echo -e " GPU Status:"
     printf "  %-5s: " "Util"; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
-    printf "  GPU temperature: %s \n"  "$GPU_TEMP"
+    printf "  GPU temperature: %s \n"  "${gpu_tmp:-N/A}"
     echo -e ""
 }
 

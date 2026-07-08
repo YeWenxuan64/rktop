@@ -1,14 +1,15 @@
 # rktop
+![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=pink)
 
 [![No Compile](https://img.shields.io/badge/build-no%20compile-brightgreen?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
-[![Platform](https://img.shields.io/badge/platform-Linux%20ARM64-orange?style=flat-square&logo=linux&logoColor=white)](https://github.com/YeWenxuan64/rktop)
 [![Language](https://img.shields.io/badge/language-Bash-4EAA25?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success?style=flat-square)](https://github.com/YeWenxuan64/rktop)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux%20ARM64-orange?style=flat-square&logo=linux&logoColor=white)](https://github.com/YeWenxuan64/rktop)
 [![Code Size](https://img.shields.io/github/languages/code-size/YeWenxuan64/rktop?style=flat-square&color=blueviolet)](https://github.com/YeWenxuan64/rktop)
 
 一个轻量级的 Bash Shell 脚本，即下载即用，用于实时监控基于 Rockchip 芯片（特别是 RK3588 系列）的开发板硬件状态喵。<br>
-是叶姐姐🍃在Rockchip平台调试Focus-Finder项目时用氛围编程写的。
+是叶姐姐🍃在Rockchip平台调试 [Focus-Finder](https://github.com/YeWenxuan64/Focus-Finder) 项目时用氛围编程写的。
 
 ## ✨ 功能特性
 
@@ -21,6 +22,7 @@
   - **RGA**: 视频处理单元负载及频率。
 - **可视化进度条**：根据负载率自动变色（绿/黄/红）。
 - **自动提权**：脚本会自动请求 `sudo` 权限以读取底层硬件信息。
+- **无需编译**: 纯 Bash 脚本，无需编译即可运行。
 - **纯净界面**：基于 TUI (Text User Interface)，无图形界面依赖。
 
 ## 📸 效果预览
@@ -63,7 +65,7 @@ RGA Status:
 - **权限**: 需要 Root 权限 (脚本会自动请求)。
 - **依赖**:
   - `bash`
-  - `lm-sensors` (用于读取温度信息，请确保已安装并配置)
+  - `lm-sensors` (用于读取温度信息，可选)
 
 ## 🚀 使用方法
 
@@ -153,6 +155,12 @@ $ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq (or cpu1, cpu2 etc)
 ```bash
 # MEM usage
 $ free
+
+# 输出内容为内存使用情况
+               total        used        free      shared  buff/cache   available
+Mem:         4013664     1678136     1685028      318996     1035700     2335528
+Swap:        2006828           0     2006828
+
 ```
 
 ```bash
