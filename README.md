@@ -104,6 +104,24 @@ BAR_WIDTH=25
 # 刷新时间 (秒)
 REFRESH_TIME=0.5
 ```
+
+也修改脚本头部的文件路径变量来适应你的芯片/系统环境：
+```bash
+# NPU
+NPU_LOAD_FILE="/sys/kernel/debug/rknpu/load"
+NPU_FREQ_FILE="/sys/class/devfreq/fdab0000.npu/cur_freq"
+
+# GPU
+GPU_FILE="/sys/class/devfreq/fb000000.gpu/load"
+
+# RGA
+...
+
+# CPU
+...
+```
+
+
 ## ⚠️ 已知缺陷与待办
 项目目前处于初期版本，存在以下局限，欢迎贡献代码：
 
@@ -112,13 +130,13 @@ REFRESH_TIME=0.5
   > ✅ 已完成 — 现已支持 RAM 和 Swap 使用率显示。
 
 - [ ] **错误处理机制简单**：<br>
-  对于非标准系统环境或文件路径缺失的情况，错误提示较为基础。<br>
-  当解析内核调试文件失败时，可能会出现显示错位，尚未做完善的异常捕获。
+  对于非标准系统环境或文件路径缺失的情况，错误提示较为基础。
 
 - [ ] **兼容性有限**：<br>
-  硬编码了部分 RK3588 的寄存器路径 (如 `fdab0000.npu`, `fb000000.gpu` 等)，可能在其他 Rockchip 芯片（如 RK3566/RK3576）上无法直接运行。
+  硬编码了部分 RK3588 的寄存器路径 (如 `fdab0000.npu`, `fb000000.gpu` 等)，可能在其他 Rockchip 芯片（如 RK3566/RK3576）上无法直接读取。
 
 
+---
 
 ## 🔧关键查询命令
 ```bash
@@ -269,6 +287,7 @@ Adapter: Virtual device
 temp1:        +46.2°C  (crit = +115.0°C)
 ```
 
+---
 
 ## 📝 许可证
 本项目采用 MIT 许可证。
