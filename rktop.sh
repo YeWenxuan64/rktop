@@ -124,18 +124,14 @@ TERM_COLS=80
 
 # 进度条最小宽度（终端过窄时的保底值）
 BAR_WIDTH_BASE=5
-# 进度条最大宽度（避免窗口过大时进度条太长）
-BAR_WIDTH_MAX=40
 # 预留边距：标签+分隔符+百分比+频率等约需30字符
-LAYOUT_MARGIN=65
+LAYOUT_MARGIN=20
 # 刷新时间 (秒)
 REFRESH_TIME=0.5
 
 # 单列宽条参数（用于 Memory 等无左右分列的模块）
 # 宽条 = 终端宽度 - 固定开销（缩进+标签+冒号+百分号+数值+括号+边距）
-WIDE_BAR_OVERHEAD=34
-# 宽条上限：单列宽度约为双列 BAR_WIDTH_MAX 的两倍
-WIDE_BAR_MAX=$(( BAR_WIDTH_MAX * 2 ))
+WIDE_BAR_OVERHEAD=26
 
 BAR_WIDTH=$BAR_WIDTH_BASE
 
@@ -203,17 +199,15 @@ get_term_size() {
 }
 
 # 动态计算 BAR_WIDTH
-# 读取全局变量: TERM_COLS, LAYOUT_MARGIN, BAR_WIDTH_BASE, BAR_WIDTH_MAX
+# 读取全局变量: TERM_COLS, LAYOUT_MARGIN, BAR_WIDTH_BASE
 # 写入全局变量: BAR_WIDTH
 calc_bar_width() {
     # 双列布局时，每列可用宽度 = (总宽 - 边距) / 2
-    local available=$(( (TERM_COLS - LAYOUT_MARGIN) / 2 ))
+    local available=$(( (TERM_COLS / 2) - LAYOUT_MARGIN))
 
-    # 限制范围
+    # 不限制最大宽度，仅设置最小宽度保底
     if (( available < BAR_WIDTH_BASE )); then
         BAR_WIDTH=$BAR_WIDTH_BASE
-    elif (( available > BAR_WIDTH_MAX )); then
-        BAR_WIDTH=$BAR_WIDTH_MAX
     else
         BAR_WIDTH=$available
     fi
@@ -369,11 +363,11 @@ query_cpu_status() {
             CPU_PREV_TOTAL[$idx]=$curr_total
             CPU_PREV_IDLE[$idx]=$curr_idle
 
-            # 4.2 读取频率
+            # 4.2 读取频率 (scaling_cur_freq 单位为 kHz，转换为 MHz 显示)
             local freq_file="$CPU_FREQ_BASE_PATH/cpu${idx}/cpufreq/scaling_cur_freq"
             if [[ -f "$freq_file" ]]; then
                 local freq_khz=$(cat "$freq_file" 2>/dev/null)
-                CPU_FREQ[$idx]=$(awk "BEGIN {printf \"%.4f\", $freq_khz/1000000}")
+                CPU_FREQ[$idx]=$(awk "BEGIN {printf \"%.0f\", $freq_khz/1000}")
             else
                 CPU_FREQ[$idx]="N/A"
             fi
@@ -511,20 +505,20 @@ display_cpu_status() {
             # 构建左侧字符串
             left_load=${CPU_LOAD[$left_idx]:-0}
             left_freq=${CPU_FREQ[$left_idx]:-"N/A"}
-            printf "  ${CYAN}%4d${NC}" "$left_idx"
+            printf "  ${CYAN}%3d${NC}" "$left_idx"
             draw_bar "$left_load"
-            printf " %3d%% @ %s GHz" "$left_load" "$left_freq"
+            printf "%3d%% %sMHz" "$left_load" "$left_freq"
 
             # 制表符间隔
-            printf "\t"
+            printf " " #"\t"
 
             # 构建右侧字符串 (如果存在)
             if [[ $right_idx -lt $CPU_CORE_COUNT ]]; then
                 right_load=${CPU_LOAD[$right_idx]:-0}
                 right_freq=${CPU_FREQ[$right_idx]:-"N/A"}
-                printf "${CYAN}%4d${NC}" "$right_idx"
+                printf "${CYAN}%3d${NC}" "$right_idx"
                 draw_bar "$right_load"
-                printf " %3d%% @ %s GHz" "$right_load" "$right_freq"
+                printf "%3d%% %sMHz" "$right_load" "$right_freq"
             fi
             printf "\n"
 
@@ -550,7 +544,7 @@ display_cpu_temperature() {
 
 # 显示内存状态
 # 读取全局变量: MEM_TOTAL, MEM_USED, MEM_PERCENT, SWAP_TOTAL, SWAP_USED, SWAP_PERCENT
-#                TERM_COLS, WIDE_BAR_OVERHEAD, BAR_WIDTH_BASE, WIDE_BAR_MAX
+#                TERM_COLS, WIDE_BAR_OVERHEAD, BAR_WIDTH_BASE
 # 写入全局变量: (无)
 display_memory_status() {
     echo -e " Memory Status:"
@@ -558,7 +552,7 @@ display_memory_status() {
     # ---- 计算宽条长度 ----
     # 一行格式: "  LABEL: [=======   ]  xx%  X.XG/X.XG"
     #            ^2  ^6   ^1  ^            ^4  ^2  ^~11     = 约 35 字符固定开销
-    # 宽条 = 终端列数 - 固定开销，然后钳位在 [BASE, MAX] 范围内
+    # 宽条 = 终端列数 - 固定开销，仅保留最小宽度保底，不限制最大宽度
     local wide_bar=$(( TERM_COLS - WIDE_BAR_OVERHEAD ))
     if (( wide_bar < BAR_WIDTH_BASE )); then
         wide_bar=$BAR_WIDTH_BASE
@@ -572,13 +566,13 @@ display_memory_status() {
     swap_total_gb=$(awk "BEGIN {printf \"%.2f\", $SWAP_TOTAL/1048576}")
 
     # 固定宽度标签，保证冒号对齐
-    printf "  ${CYAN}%4s${NC}" "RAM"
+    printf "  ${CYAN}%3s${NC}" "Ram"
     draw_bar "$MEM_PERCENT" "$wide_bar"
-    printf " %3d%%  %sG/%sG\n" "$MEM_PERCENT" "$mem_used_gb" "$mem_total_gb"
+    printf "%3d%% %sG/%sG\n" "$MEM_PERCENT" "$mem_used_gb" "$mem_total_gb"
 
-    printf "  ${CYAN}%4s${NC}" "Swap"
+    printf "  ${CYAN}%3s${NC}" "Swp"
     draw_bar "$SWAP_PERCENT" "$wide_bar"
-    printf " %3d%%  %sG/%sG\n" "$SWAP_PERCENT" "$swap_used_gb" "$swap_total_gb"
+    printf "%3d%% %sG/%sG\n" "$SWAP_PERCENT" "$swap_used_gb" "$swap_total_gb"
     echo -e ""
 }
 
@@ -590,9 +584,9 @@ display_npu_status() {
     npu_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^npu_thermal/{getline; getline; print $2}')
 
     echo -e " NPU Status:"
-    printf "  ${CYAN}%4s${NC}" "0"; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
-    printf "  ${CYAN}%4s${NC}" "1"; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
-    printf "  ${CYAN}%4s${NC}" "2"; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
+    printf "  ${CYAN}%3s${NC}" "0"; draw_bar "$NPU_CORE0_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE0_LOAD" "${NPU_FREQ}"
+    printf "  ${CYAN}%3s${NC}" "1"; draw_bar "$NPU_CORE1_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE1_LOAD" "${NPU_FREQ}"
+    printf "  ${CYAN}%3s${NC}" "2"; draw_bar "$NPU_CORE2_LOAD"; printf " %3d%% @ %s GHz\n" "$NPU_CORE2_LOAD" "${NPU_FREQ}"
     printf "  NPU temperature: %s \n"  "${npu_tmp:-N/A}"
     echo -e ""
 }
@@ -605,7 +599,7 @@ display_gpu_status() {
     gpu_tmp=$(echo "$SENSORS_OUTPUT" | awk '/^gpu_thermal/{getline; getline; print $2}')
 
     echo -e " GPU Status:"
-    printf "  ${CYAN}%4s${NC}" "Util"; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
+    printf "  ${CYAN}%3s${NC}" "Gpu"; draw_bar "$GPU_LOAD"; printf " %3d%% @ %s GHz\n" "$GPU_LOAD" "$GPU_FREQ"
     printf "  GPU temperature: %s \n"  "${gpu_tmp:-N/A}"
     echo -e ""
 }
@@ -615,9 +609,9 @@ display_gpu_status() {
 # 写入全局变量: (无)
 display_rga_status() {
     echo -e " RGA Status (Video Proc):"
-    printf "  ${CYAN}%4s${NC}" "3_0"; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
-    printf "  ${CYAN}%4s${NC}" "3_1"; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
-    printf "  ${CYAN}%4s${NC}" "2"  ; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
+    printf "  ${CYAN}%3s${NC}" "3_0"; draw_bar "$RGA_LOAD0"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD0" "${RGA_FREQ0:-N/A}"
+    printf "  ${CYAN}%3s${NC}" "3_1"; draw_bar "$RGA_LOAD1"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD1" "${RGA_FREQ1:-N/A}"
+    printf "  ${CYAN}%3s${NC}" "2"  ; draw_bar "$RGA_LOAD2"; printf " %3d%% @ %s GHz\n" "$RGA_LOAD2" "${RGA_FREQ2:-N/A}"
 }
 
 

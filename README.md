@@ -1,12 +1,12 @@
 # rktop
 ![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=pink)
 
-[![No Compile](https://img.shields.io/badge/build-no%20compile-brightgreen?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
-[![Language](https://img.shields.io/badge/language-Bash-4EAA25?style=flat-square&logo=gnubash&logoColor=white)](https://github.com/YeWenxuan64/rktop)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success?style=flat-square)](https://github.com/YeWenxuan64/rktop)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux%20ARM64-orange?style=flat-square&logo=linux&logoColor=white)](https://github.com/YeWenxuan64/rktop)
-[![Code Size](https://img.shields.io/github/languages/code-size/YeWenxuan64/rktop?style=flat-square&color=blueviolet)](https://github.com/YeWenxuan64/rktop)
+[![No Compile](https://img.shields.io/badge/build-no%20compile-brightgreen)](https://github.com/YeWenxuan64/rktop)
+[![Language](https://img.shields.io/badge/language-Bash-brightgreen)](https://github.com/YeWenxuan64/rktop)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)](https://github.com/YeWenxuan64/rktop)
+[![Platform](https://img.shields.io/badge/platform-Linux%20ARM64-orange)](https://github.com/YeWenxuan64/rktop)
+[![Code Size](https://img.shields.io/github/size/YeWenxuan64/rktop/rktop.sh?color=violet)](https://github.com/YeWenxuan64/rktop/blob/main/rktop.sh)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
 
 一个轻量级的 Bash Shell 脚本，即下载即用，用于实时监控基于 Rockchip 芯片（特别是 RK3588 系列）的开发板硬件状态喵。<br>
 是叶姐姐🍃在Rockchip平台调试 [Focus-Finder](https://github.com/YeWenxuan64/Focus-Finder) 项目时用氛围编程写的。
@@ -30,32 +30,32 @@
 Rockchip Monitor (Refresh: 0.5s)             Time: 11:45:14
 --------------------
 CPU Status:
- CPU0  : [||||||||||||            ]  45% @ 1.800 GHz    CPU4  : [||||||||||              ]  38% @ 2.200 GHz
- CPU1  : [||||||||||              ]  38% @ 1.800 GHz    CPU5  : [||||||||||              ]  38% @ 2.200 GHz
- CPU2  : [||||||||||||||          ]  52% @ 1.800 GHz    CPU6  : [|||||                   ]  20% @ 2.200 GHz
- CPU3  : [|||||                   ]  20% @ 1.800 GHz    CPU7  : [||||||||||||            ]  45% @ 2.200 GHz
+   0[||||||||||||            ] 45% 1800MHz  4[||||||||||              ] 38% 2200MHz
+   1[||||||||||              ] 38% 1800MHz  5[||||||||||              ] 38% 2200MHz
+   2[||||||||||||||          ] 52% 1800MHz  6[|||||                   ] 20% 2200MHz
+   3[|||||                   ] 20% 1800MHz  7[||||||||||||            ] 45% 2200MHz
 SOC temperature: +42.0°C 
 Little cores temperature: +40.0°C 
 Big core0 temperature: +45.0°C    Big core1 temperature: +46.0°C 
 
 Memory Status:
- RAM  : [||||||||||||||||||||||||||||||||||            ]  75%  2.8G/3.8G
- Swap : [|||||||                                       ]  16%  0.3G/2.0G
+ Ram[||||||||||||||||||||||||||||||||||            ]  75%  2.8G/3.8G
+ Swp[|||||||                                       ]  16%  0.3G/2.0G
 
 NPU Status:
- Core0: [|||||||||||||||||||||||| ]  92% @ 1.00 GHz
- Core1: [||||||||                 ]  30% @ 1.00 GHz
- Core2: [                         ]   0% @ 0.00 GHz
+   0[|||||||||||||||||||||||| ]  92% @ 1.00 GHz
+   1[||||||||                 ]  30% @ 1.00 GHz
+   2[                         ]   0% @ 0.00 GHz
  NPU temperature: +48.0°C 
 
 GPU Status:
- Util : [||||||||                 ]  28% @ 0.30 GHz
+ Gpu[||||||||                 ]  28% @ 0.30 GHz
 GPU temperature: +44.0°C
 
 RGA Status:
- RGA3_0: [                         ]   0% @ 0.75 GHz
- RGA3_1: [                         ]   0% @ 0.75 GHz
- RGA2:   [                         ]   0% @ 0.75 GHz
+ 3_0[                         ]   0% @ 0.75 GHz
+ 3_1[                         ]   0% @ 0.75 GHz
+   2[                         ]   0% @ 0.75 GHz
 --------------------
 ```
 
@@ -141,9 +141,9 @@ GPU_FILE="/sys/class/devfreq/fb000000.gpu/load"
 - [ ] **错误处理机制简单**：<br>
   对于非标准系统环境或文件路径缺失的情况，错误提示较为基础。
 
-- [ ] **兼容性有限**：<br>
+- [x] **兼容性有限**：<br>
   硬编码了部分 RK3588 的寄存器路径 (如 `fdab0000.npu`, `fb000000.gpu` 等)，可能在其他 Rockchip 芯片（如 RK3566/RK3576）上无法直接读取。
-
+  > ✅ 已完成 — 现已支持搜索 `*.npu`, `*.gpu` 文件。
 
 ---
 
