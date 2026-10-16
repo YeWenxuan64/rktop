@@ -8,6 +8,8 @@
 [![Code Size](https://img.shields.io/github/size/YeWenxuan64/rktop/rktop.sh?color=violet)](https://github.com/YeWenxuan64/rktop/blob/main/rktop.sh)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/YeWenxuan64/rktop/blob/main/LICENSE)
 
+[Readme_EN](./README_EN.md)
+
 一个轻量级的 Bash Shell 脚本，即下载即用，用于实时监控基于 Rockchip 芯片（特别是 RK3588 系列）的开发板硬件状态喵。<br>
 是叶姐姐🍃在Rockchip平台调试 [Focus-Finder](https://github.com/YeWenxuan64/Focus-Finder) 项目时用氛围编程写的。
 
@@ -299,5 +301,5 @@ temp1:        +46.2°C  (crit = +115.0°C)
 ---
 
 ## 📝 许可证
-本项目采用 MIT 许可证。
+本项目采用 [MIT](./LICENSE) 许可证。<br>
 欢迎 Issue 和 Pull Request。
